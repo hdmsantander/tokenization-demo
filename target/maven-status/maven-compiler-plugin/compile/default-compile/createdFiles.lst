@@ -1,0 +1,12 @@
+com/tokenization/demo/service/NgramTokenizer.class
+com/tokenization/demo/service/StopwordTokenizer.class
+com/tokenization/demo/model/TokenizationResult.class
+com/tokenization/demo/controller/TokenizationApiController.class
+com/tokenization/demo/service/WhitespaceTokenizer.class
+com/tokenization/demo/TokenizationDemoApplication.class
+com/tokenization/demo/controller/TokenizationController.class
+com/tokenization/demo/service/LowercaseTokenizer.class
+com/tokenization/demo/service/Tokenizer.class
+com/tokenization/demo/service/TokenizationService.class
+com/tokenization/demo/service/StemTokenizer.class
+com/tokenization/demo/model/TokenizeRequest.class

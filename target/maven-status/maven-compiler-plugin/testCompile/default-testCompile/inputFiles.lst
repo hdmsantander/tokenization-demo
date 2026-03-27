@@ -1,0 +1,6 @@
+/workspace/src/test/java/com/tokenization/demo/service/WhitespaceTokenizerTest.java
+/workspace/src/test/java/com/tokenization/demo/service/StemTokenizerTest.java
+/workspace/src/test/java/com/tokenization/demo/service/TokenizationServiceTest.java
+/workspace/src/test/java/com/tokenization/demo/TokenizationDemoApplicationTests.java
+/workspace/src/test/java/com/tokenization/demo/service/StopwordTokenizerTest.java
+/workspace/src/test/java/com/tokenization/demo/service/NgramTokenizerTest.java

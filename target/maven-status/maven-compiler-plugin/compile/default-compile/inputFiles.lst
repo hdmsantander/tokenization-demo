@@ -1,0 +1,12 @@
+/workspace/src/main/java/com/tokenization/demo/controller/TokenizationController.java
+/workspace/src/main/java/com/tokenization/demo/model/TokenizeRequest.java
+/workspace/src/main/java/com/tokenization/demo/service/TokenizationService.java
+/workspace/src/main/java/com/tokenization/demo/service/Tokenizer.java
+/workspace/src/main/java/com/tokenization/demo/service/WhitespaceTokenizer.java
+/workspace/src/main/java/com/tokenization/demo/service/StemTokenizer.java
+/workspace/src/main/java/com/tokenization/demo/service/NgramTokenizer.java
+/workspace/src/main/java/com/tokenization/demo/service/LowercaseTokenizer.java
+/workspace/src/main/java/com/tokenization/demo/TokenizationDemoApplication.java
+/workspace/src/main/java/com/tokenization/demo/service/StopwordTokenizer.java
+/workspace/src/main/java/com/tokenization/demo/model/TokenizationResult.java
+/workspace/src/main/java/com/tokenization/demo/controller/TokenizationApiController.java
