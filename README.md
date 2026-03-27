@@ -44,6 +44,7 @@ Industry-standard **OpenTelemetry** instrumentation in Spring Boot 3 (**Micromet
 
 | Document | Purpose |
 |----------|---------|
+| [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) | Staged implementation plan: Docker Compose demo layers, README milestones, scope validation, contradictions/gaps, complexity (engineering units) |
 | [**SEARCH FEATURE.md**](./SEARCH%20FEATURE.md) | Full design: **§3.4–§3.5** industry parallels & anti-pattern validation, **§16** defaults, **§17** effort, **§18** observability, **§19** Docker Compose, **§20** Kubernetes, **§21** Azure & GCP, CDC (§6), refresh, topics, Hadoop, testing |
 
 ## Industry alignment (summary)
