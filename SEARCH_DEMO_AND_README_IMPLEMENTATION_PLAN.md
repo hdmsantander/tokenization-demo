@@ -1,13 +1,13 @@
 # Search feature demo and README — implementation plan
 
-This document plans **staged, incremental work** to deliver the **local search demo** (Docker Compose, aligned with [SEARCH FEATURE.md](./SEARCH%20FEATURE.md) **§19**) and to evolve the **project README** once implementation exists. It **validates scope**, flags **contradictions or gaps**, and estimates **complexity** using the same **engineering units** as **§17** (T-shirt sizes: S / M / L / XL). **Calendar duration** is intentionally not estimated here: it depends on team size, parallelization, and prior familiarity with Spring Boot, Kafka, and Elasticsearch (see **§17** note on mature-team assumptions).
+This document plans **staged, incremental work** to deliver the **local search demo** (Docker Compose, aligned with [SEARCH FEATURE.md](./SEARCH%20FEATURE.md) **§19**) and to evolve the **project README** once implementation exists. It **validates scope and layers**, records **demo v1 decisions** so coding can start, estimates **effort in person-days** (with assumptions), and lists **pre-implementation tasks** for whoever implements next (human or agent).
 
 **Related documents**
 
 | Document | Role |
 |----------|------|
 | [README.md](./README.md) | Entry point; status, summaries, links |
-| [SEARCH FEATURE.md](./SEARCH%20FEATURE.md) | Full architecture; **§15** phases, **§17** effort, **§19** Compose scope |
+| [SEARCH FEATURE.md](./SEARCH%20FEATURE.md) | Full architecture; **§15** phases, **§17** relative effort (T-shirt), **§19** Compose scope |
 
 ---
 
@@ -16,63 +16,61 @@ This document plans **staged, incremental work** to deliver the **local search d
 | Aspect | State |
 |--------|--------|
 | Implementation | **None** — docs and license only |
-| Branch intent | `cursor/search-demo-and-readme-plan-6dea` — planning for demo + README |
 | Authoritative demo spec | **SEARCH FEATURE.md §19.1–§19.3** |
 
 **Implication:** All layers below are **greenfield**; the demo is the **integration spine** that proves each layer.
 
 ---
 
-## 2. Scope validation
+## 2. Layer validation and plan corrections
 
-### 2.1 In scope (demo + README)
+### 2.1 Verdict on the five layers
 
-| Item | Rationale |
-|------|-----------|
-| **Docker Compose stack** | **§19.1**: PostgreSQL (logical replication), Kafka, Kafka Connect + Debezium, Elasticsearch (or OpenSearch), Redis (optional for query cache), Spring services built from Dockerfiles |
-| **Minimal happy-path E2E** | Inventory (or seed) → outbox → Debezium → Kafka → indexer → ES → query API returns expected hits |
-| **Documented boundaries** | **§19.2**: single-host, non-HA, resource pins, demo secrets only |
-| **README updates** | Replace or supplement “planning only” with **how to run the demo**, prerequisites, and pointers to **SEARCH FEATURE.md** for depth |
-| **Optional CI hook** | **§19.3**: optional Compose smoke vs **Testcontainers** as default for automated tests |
+| Layer | Verdict | Notes |
+|-------|---------|--------|
+| **1 — Foundations** | **Sound** | Correct first step: build, modules, contracts, minimal Boot apps, Testcontainers baseline. |
+| **2 — Read path** | **Sound** | Proves ES mapping and query API **before** Kafka complexity; reduces integration risk. |
+| **3 — Ingest path** | **Sound** | Correct ordering: outbox in OLTP → Debezium → consumer → ES; matches **§6** and **§17** critical path. |
+| **4 — Compose demo** | **Sound but refine deps** | Compose is not only “after C.4”: an **infra-only** Compose (PG + ES + Redis, no Kafka) can ship **after Layer 2** for local query demos; **full** stack Compose remains **after C.4** (see **§2.3**). |
+| **5 — README / UX** | **Sound** | Must trail runnable behavior; keep README thin and link **SEARCH FEATURE.md**. |
 
-### 2.2 Explicitly out of scope for the “demo milestone”
+### 2.2 Issues fixed in this revision
 
-| Item | Where documented |
-|------|------------------|
-| Production HA, multi-AZ | **§19.2**, **§20** |
-| Kubernetes manifests as a **requirement** | **§20** — next step after Compose |
-| Full observability stack as **mandatory** in demo | **§19.1** — OTel/Prometheus/Grafana **optional** |
-| Lake / Spark / Hadoop | **Phase 1b+** (**§15**) |
-| NL/recipe quality at scale | **Phase 2–3** |
+| Issue | Resolution |
+|-------|--------------|
+| **Compose dependency** stated only as “after C.4+” | Split into **D0 (infra-only)** vs **D1 (full pipeline)** in **§4** and **§8**. |
+| **Open decisions** blocked coding | **Frozen defaults for demo v1** in **§3** (document ID, payload format, minimal domain). |
+| **Effort section avoided calendar/person time** | **§7** now gives **person-day ranges** and **calendar hints** with explicit assumptions. |
+| **No explicit agent/human pre-flight list** | **§9** lists tasks to complete **before** writing production code paths. |
 
-### 2.3 Scope checklist (pass/fail)
+### 2.3 Scope validation (unchanged summary)
+
+**In scope:** Compose per **§19.1** (full demo), minimal E2E inventory → outbox → Debezium → indexer → ES → query, boundaries **§19.2**, README quickstart when code exists, optional CI smoke **§19.3**.
+
+**Out of scope for demo milestone:** HA, mandatory K8s, mandatory full observability stack, lake/Spark, NL/recipe quality at scale (**§15** later phases).
+
+**Scope checklist**
 
 | Check | Result |
 |-------|--------|
-| Demo stack matches **§19.1** component list | **Pass** if all required infra + at least **query + indexer + inventory** paths exist; Redis optional |
+| Demo stack matches **§19.1** | **Pass** when full Compose includes PG, Kafka, Connect+Debezium, ES, Spring services; Redis optional |
 | README does not promise production SLOs | **Pass** if README defers HA/SLA to **SEARCH FEATURE.md** |
-| Single source of truth for CDC pattern | **Pass** if README and demo both reflect **outbox + Debezium** (**README** summary + **§6**) |
-| Stakeholder “feedback before implementation” (**README**) | **Process gap** — see **§6.1**: align README wording when implementation starts |
+| CDC pattern consistency | **Pass** if demo uses **outbox + Debezium** as in **README** + **§6** |
 
 ---
 
-## 3. Layered build model
+## 3. Demo v1 decisions (frozen for development)
 
-Layers are **bottom-up**: each layer adds dependencies for the next. Work packages can be **parallelized** where indicated.
+These defaults unblock implementation; revisit only if compliance or licensing forces a change.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Layer 5 — README & developer UX (tracks Layers 1–4)   │
-├─────────────────────────────────────────────────────────┤
-│  Layer 4 — Demo polish: Compose UX, smoke, docs/compose │
-├─────────────────────────────────────────────────────────┤
-│  Layer 3 — Ingest path: outbox → Debezium → indexer → ES│
-├─────────────────────────────────────────────────────────┤
-│  Layer 2 — Read path: ES mapping + search-query-service │
-├─────────────────────────────────────────────────────────┤
-│  Layer 1 — Foundations: repo layout, build, contracts   │
-└─────────────────────────────────────────────────────────┘
-```
+| Topic | Demo v1 choice | Rationale |
+|-------|----------------|-----------|
+| **Search engine** | **Elasticsearch** (official Docker image) | Faster path with Spring Data Elasticsearch docs; **OpenSearch** remains a documented swap (**§16.2**). |
+| **Payload on Kafka (demo)** | **JSON** on topics; **no Schema Registry** in v1 | Lower moving parts; add Avro + registry in a later increment (**§6.4**). |
+| **Document ID** | **`{tenant_id}:{store_id}:{sku}`** (string) | Stable idempotency key; matches multi-tenant + store slice; align `routing` later if needed (**§6.3.3**). |
+| **Enrichment** | **Merged into `search-indexer-service`** | Matches **§2** “may be merged with indexer in v1”; separate `enrichment-worker` only if CPU/lag forces it. |
+| **Outbox cleanup** | **Processed flag + periodic job** (or delete-after-publish if relay owns idempotency) | **§6.0** requires explicit design; demo favors simple **mark processed** to avoid unbounded growth. |
+| **Gateway** | **Optional in v1** | Call **search-query-service** and **inventory-api-service** directly from demo clients; add Spring Cloud Gateway in Phase 1+ polish. |
 
 ---
 
@@ -80,152 +78,193 @@ Layers are **bottom-up**: each layer adds dependencies for the next. Work packag
 
 ### Stage A — Layer 1: Foundations (**§15 Phase 0** subset)
 
-| Increment | Deliverable | Complexity | Depends on |
-|-----------|-------------|------------|------------|
-| A.1 | Parent POM (Java 21, Spring Boot 3.2+), module naming per **§12**, `.gitignore` / CI skeleton | **S** | — |
-| A.2 | `shared-contracts` (JSON Schema or Avro for outbox / enriched payloads per **§6.8**) | **S** | A.1 |
-| A.3 | `search-query-service` empty Boot app: health, actuator, `application-docker.yml` placeholders | **M** | A.1 |
-| A.4 | `search-indexer-service` skeleton (listener stub, no ES yet) | **S–M** | A.1, A.2 |
-| A.5 | `inventory-api-service` skeleton (REST stub, DB not wired) | **S–M** | A.1 |
-| A.6 | **Testcontainers** baseline (ES first; PG as needed) — **§19.3** | **M** | A.3+ |
+| ID | Deliverable | Complexity | Depends on |
+|----|-------------|------------|------------|
+| A.1 | Parent POM (Java 21, Spring Boot 3.2+), modules per **§12**, CI workflow (`mvn verify`) | M | — |
+| A.2 | `shared-contracts`: JSON Schema (or records) for **unwrapped** outbox / `IndexItem` payloads | M | A.1 |
+| A.3 | `search-query-service`: Boot app, health, actuator, config profiles | M | A.1 |
+| A.4 | `search-indexer-service`: Boot app + Kafka listener stub (no ES yet) | M | A.1, A.2 |
+| A.5 | `inventory-api-service`: Boot app + REST stub | S–M | A.1 |
+| A.6 | Testcontainers: ES (+ PG when inventory uses JDBC) | M | A.3+ |
 
-**Exit criteria:** `mvn verify` (or equivalent) passes; no Compose required yet.
+**Exit criteria:** `mvn verify` passes on CI without Compose.
 
 ---
 
-### Stage B — Layer 2: Elasticsearch read path (**Phase 0** continuation)
+### Stage B — Layer 2: Elasticsearch read path
 
-| Increment | Deliverable | Complexity | Depends on |
-|-----------|-------------|------------|------------|
-| B.1 | Index mapping + settings (analyzers, `tenant_id`) per **§4.1** | **M** | A.3 |
-| B.2 | Seed script or test fixture loading **static** docs into ES | **S** | B.1 |
-| B.3 | Query API: text + filters → ES DSL; **no Redis required** for first slice | **M** | B.1 |
-| B.4 | Optional: Redis cache with **safe multi-tenant keys** (**§9**, **§17**) | **M** | B.3 |
+| ID | Deliverable | Complexity | Depends on |
+|----|-------------|------------|------------|
+| B.1 | Index mapping + settings (`tenant_id`, text fields, filters) **§4.1** | M | A.3 |
+| B.2 | Seed: test fixture or `_bulk` script for static docs | S | B.1 |
+| B.3 | Query API: query string + structured filters → ES DSL | M | B.1 |
+| B.4 | Optional: Redis cache + safe cache keys **§9** | M | B.3 |
 
-**Exit criteria:** Hitting query service returns results for seeded data **without** Kafka/Debezium.
+**Exit criteria:** Query service returns hits for seeded data **without** Kafka.
 
 ---
 
 ### Stage C — Layer 3: Ingest path (**§15 Phase 1** core)
 
-| Increment | Deliverable | Complexity | Depends on |
-|-----------|-------------|------------|------------|
-| C.1 | PostgreSQL migrations: business tables + **transactional outbox** (**§6**) | **M** | A.5 |
-| C.2 | Inventory API writes **business + outbox** in **one transaction** | **M** | C.1 |
-| C.3 | Design and implement **outbox cleanup / processed marker** (**§6.0** operational note) | **M** | C.2 |
-| C.4 | Debezium connector config: outbox table → Kafka topic; `wal_level=logical` in Compose | **M–L** | C.1 |
-| C.5 | Unwrap path (SMT or relay) + partition key discipline (**§6.3**) | **M** | C.4 |
-| C.6 | **enrichment-worker** *or* merged enrichment in **indexer** for v1 (**§2** table note) | **L** | C.5, A.4 |
-| C.7 | Indexer: idempotent bulk upsert/delete, **DLQ** topic, version/tombstone handling (**§7.2**) | **L** | C.6, B.1 |
+| ID | Deliverable | Complexity | Depends on |
+|----|-------------|------------|------------|
+| C.1 | Flyway/Liquibase: `items` (or equivalent) + **outbox** table | M | A.5 |
+| C.2 | Inventory API: business write + outbox insert **same transaction** | M | C.1 |
+| C.3 | Outbox cleanup: processed marker + scheduled job or relay | M | C.2 |
+| C.4 | Debezium: connector JSON, `wal_level=logical`, slot monitoring notes | L | C.1 |
+| C.5 | Consumer reads **unwrapped** payload; partition key = `document_id` | M | C.4, A.2 |
+| C.6 | Indexer: map event → ES doc; **idempotent** upsert/delete; **DLQ** | L | C.5, B.1 |
 
-**Exit criteria:** Single item mutation in inventory becomes **search-visible** through the full pipeline (within demo-tuned **refresh_interval**).
+**Exit criteria:** Mutation via inventory API becomes **search-visible** end-to-end (accounting for ES `refresh_interval`).
 
-**Parallelization:** C.4–C.5 can overlap with C.6 design if topic contracts are fixed (A.2).
+**Parallelization:** C.4 connector tuning can overlap with C.6 **if** topic names and JSON contract are frozen (A.2).
 
 ---
 
-### Stage D — Layer 4: Docker Compose demo (**§19**)
+### Stage D — Layer 4: Docker Compose (**§19**)
 
-| Increment | Deliverable | Complexity | Depends on |
-|-----------|-------------|------------|------------|
-| D.1 | `docker-compose.yml` + pinned images: PG, Kafka (KRaft preferred **§19.1**), Connect+Debezium, ES, Redis | **S–M** | C.4+ |
-| D.2 | Multi-stage **Dockerfiles** per Spring service (**§19.1**) | **S** | A.* |
-| D.3 | `application-docker.yml` (or env) aligned with Compose DNS names (**§19.2**) | **M** | D.1 |
-| D.4 | Init job or documented steps: register connector, create topics | **M** | D.1 |
-| D.5 | Optional: OTel Collector + Prometheus + Grafana (**§19.1** optional) | **M** | D.1 |
-| D.6 | Optional: **Compose smoke** job in CI (**§19.3**) | **M–L** | D.1–D.4 |
+| ID | Deliverable | Complexity | Depends on |
+|----|-------------|------------|------------|
+| **D0** | **`docker-compose.infra.yml`** or profile: **PG + ES (+ Redis)** for local dev / Stage B demos | S–M | B.1 (for ES) |
+| D.1 | **`docker-compose.yml`**: PG, Kafka (KRaft **§19.1**), Connect+Debezium, ES, Redis | M | C.4 |
+| D.2 | Multi-stage **Dockerfiles** per Spring service | S | A.* |
+| D.3 | `application-docker.yml` / env; Compose DNS names **§19.2** | M | D.1 |
+| D.4 | Init: create topics, register connector (script or documented `curl`) | M | D.1 |
+| D.5 | Optional: OTel Collector, Prometheus, Grafana **§19.1** | M | D.1 |
+| D.6 | Optional: CI Compose smoke **§19.3** | L | D.1–D.4 |
 
-**Exit criteria:** New developer can follow **one** numbered path: clone → Compose up → seed → query → see updates propagate.
+**Exit criteria:** Clone → `docker compose up` → run init steps → mutate inventory → query sees update.
 
 ---
 
 ### Stage E — Layer 5: README and ancillary docs
 
-| Increment | Deliverable | Complexity | Depends on |
-|-----------|-------------|------------|------------|
-| E.1 | README **Quickstart** (prereqs: Docker, RAM/CPU hints per **§19.2**) | **S** | D.1+ |
-| E.2 | README **Architecture** section: keep short; link **SEARCH FEATURE.md** for CDC, observability, cloud (**§21**) | **S** | E.1 |
-| E.3 | README **Status** line: distinguish “demo runnable” vs “production ready” | **S** | E.1 |
-| E.4 | Optional `compose/README.md`: resource pins, troubleshooting (connector lag, ES yellow) | **S–M** | D.1 |
-
-**Exit criteria:** README is accurate for **current** repo behavior; no duplicate of **SEARCH FEATURE.md**’s full spec.
+| ID | Deliverable | Complexity | Depends on |
+|----|-------------|------------|------------|
+| E.1 | README **Quickstart** (Docker, RAM/CPU **§19.2**) | S | D1 exit criteria met |
+| E.2 | README **Development** pointer to this file + branch conventions | S | E.1 |
+| E.3 | README **Status**: demo runnable vs production | S | E.1 |
+| E.4 | `compose/README.md`: resources, troubleshooting (connector lag, ES yellow) | S–M | D.1 |
 
 ---
 
-## 5. Critical path (complexity aggregation)
+## 5. Critical path
 
-The **longest dependency chain** for “search updates from inventory” matches **§17**:
+**Inventory TX + outbox → Debezium → Kafka consumer → indexer → ES** is the long pole (**Stage C** + **D1** wiring).
 
-**Outbox + inventory TX → Debezium + unwrap → indexer + ES** → aggregate **M + (M–L) + M + L** with parallel work on **query service** and **Compose** once contracts exist.
-
-**README** work is **not** on the critical path for the pipeline but should **trail** D.1–D.4 so instructions stay truthful.
+**Query-only path** (**A → B → D0**) is a valid **parallel track** for frontend or contract demos.
 
 ---
 
-## 6. Issues, contradictions, and mitigations
+## 6. Contradictions, risks, mitigations
 
-### 6.1 Process vs README
-
-| Finding | Mitigation |
-|---------|------------|
-| **README** states implementation is deferred pending stakeholder feedback | When Stage A starts, add a **short “Implementation in progress”** banner and date, or gate merge to `main` via your org’s review process |
-
-### 6.2 Architecture doc internal tensions (resolved in design)
-
-| Topic | Tension | Resolution in design |
-|-------|---------|----------------------|
-| Enrichment placement | Separate **enrichment-worker** in diagram vs “may be merged with indexer in v1” **§2** | **Demo v1:** merge into indexer unless load testing forces split |
-| Redis | “Optional in demo” **§19.1** vs Phase 0 **Redis tests** **§15** | **Acceptable:** optional runtime in Compose; tests still validate cache path when Redis is enabled |
-| Elasticsearch vs OpenSearch | Both allowed **§16.2** | **Pick one** per `docker-compose.yml` for demo; document license/support choice in README |
-
-### 6.3 Demo vs production expectations
-
-| Risk | Mitigation |
-|------|------------|
-| Readers confuse Compose with production | README + **§19.2** callout: single-host, no HA; link **§20** |
-| WAL / replication slot growth on laptop | Document **connector pause** and slot monitoring pointers (**§18.3**) in `compose/README.md` |
-
-### 6.4 Testing strategy tension
-
-| Finding | Mitigation |
-|---------|------------|
-| **§19.3** prefers Testcontainers for CI; full **PG + Kafka + Connect + ES** in CI is **M–L** **§17** | Start with **split tests**: unit + Testcontainers ES; add Connect E2E nightly or manual until flake budget allows |
-
-### 6.5 Gaps to decide before coding
-
-| Decision | Why it matters |
-|----------|----------------|
-| Exact **document ID** key (SKU×store×tenant vs other) | Indexer idempotency and routing **§6.3.3** |
-| **Schema Registry** in demo or plain JSON for v1 | Unwrap consumer complexity **§6.4** |
-| Minimal **inventory** domain model for demo | Drives outbox payload shape **§6.8** |
+| Topic | Mitigation |
+|-------|------------|
+| README “feedback before implementation” | README updated to **implementation-ready** stance with link to this plan (**§3** decisions). |
+| Compose ≠ production | Call out **§19.2** in README and `compose/README.md`. |
+| Debezium / WAL / slot on laptop | Document limits + link **§18.3** checklist in compose README. |
+| CI flake on full stack | Prefer **Testcontainers** per PR; Compose smoke **nightly** or manual until stable (**§19.3**). |
 
 ---
 
-## 7. Complexity summary (no calendar time)
+## 7. Effort and complexity (estimated)
 
-| Area | Typical aggregate complexity | Notes |
-|------|------------------------------|-------|
-| Foundations + query-only path (Stages A–B) | **M–L** | Dominated by ES mapping and query DSL |
-| Full ingest + idempotent indexer (Stage C) | **L** | Retries, DLQ, version discipline |
-| Compose demo wiring (Stage D) | **S–M** | Ops tuning; not HA |
-| Full CI E2E with Debezium in every PR | **M–L** | Timeouts and flakes |
-| README + compose developer notes (Stage E) | **S** | After demo is stable |
+### 7.1 Unit definitions
 
-**Interpretation:** Delivering a **credible vertical slice** (Stages A–C + minimal D) is **multiple L-class components** on the critical path; **§17** remains the authoritative per-feature breakdown.
+| Unit | Meaning |
+|------|---------|
+| **Person-day (pd)** | One engineer, ~6 hours of **focused** implementation/review/debug (not calendar elapsed). |
+| **Complexity** | **S** = isolated; **M** = several files/services; **L** = cross-cutting or ops-heavy; **XL** = program-sized (not used for demo scope). |
+
+### 7.2 Assumptions (read before using numbers)
+
+- Engineer is **comfortable** with **Spring Boot 3**, **Kafka**, and **Elasticsearch** basics (has shipped at least one service using each).
+- **No** organizational blockers (license approval for Elastic Docker image, internal registry, etc.).
+- **Single** environment target first: **Linux + Docker Compose** on a machine with **≥ 16 GB RAM** (see **§19.2**).
+- Estimates include **unit + integration tests** for each stage, not a separate QA team.
+
+If the engineer is **new to Debezium or Connect**, add **+3–5 pd** to Stage C. If **Schema Registry** is required from day one, add **+2–4 pd** across A.2, C.5, and D.4.
+
+### 7.3 Effort by stage (person-days)
+
+| Stage | Low (pd) | High (pd) | Dominant risk |
+|-------|----------|-----------|----------------|
+| **A** Foundations | 4 | 7 | CI + Testcontainers stability |
+| **B** Read path | 5 | 9 | Mapping + query DSL edge cases |
+| **C** Ingest path | 12 | 22 | Debezium slot, unwrap, idempotent indexer + DLQ |
+| **D** Compose (D0 + D1–D4) | 4 | 8 | Image pins, JVM heap, connector bootstrap |
+| **E** README / compose docs | 1 | 3 | Keeping docs in sync with scripts |
+| **Optional** D.5 observability | 2 | 5 | Wiring scrape targets locally |
+| **Optional** D.6 CI Compose smoke | 3 | 6 | Flakes, timeouts |
+| **Total (demo vertical slice, no optional)** | **26** | **49** | Stage **C** |
+| **Total with optional D.5 + D6** | **31** | **60** | CI + ops surface |
+
+### 7.4 Calendar translation (illustrative only)
+
+| Team shape | Rough calendar (same order of work as stages) |
+|------------|-----------------------------------------------|
+| **1 engineer full-time** | ~**5.5–10 weeks** wall-clock for **26–49 pd** (using ~5 pd/week effective after meetings and context switching) |
+| **2 engineers** (e.g. one on **B+D0**, one on **A+C** after contracts) | Often **~3–6 weeks** to first full E2E, if merge conflicts and integration are managed daily |
+
+These calendars are **not commitments**; they convert pd ranges under typical productivity. Parallel work reduces calendar time but **does not** reduce total pd much.
+
+### 7.5 Comparison to SEARCH FEATURE.md §17
+
+**§17** T-shirt sizes are **ordinal** (good for prioritization). This **§7** table is **cardinal** (pd) for the **demo slice only**. Items in §17 such as **Gateway**, **lake/Spark**, **multi-region**, and **NL/recipe XL** are **out of scope** for the first demo milestone.
 
 ---
 
-## 8. Suggested milestone ordering (product view)
+## 8. Milestones (product view)
 
-1. **Milestone 1 — Queryable index:** Stages A (partial) + B — proves ES and API contract.  
-2. **Milestone 2 — Live index updates:** Stage C — proves outbox + Debezium + indexer.  
-3. **Milestone 3 — Repeatable demo:** Stage D — proves onboarding without local JVM setup for infra.  
-4. **Milestone 4 — Documentation:** Stage E — README and optional `compose/README.md`.
+1. **M1 — Queryable index:** A + B (+ **D0** optional) — ES + API without Kafka.  
+2. **M2 — Live updates:** C — full CDC path to ES.  
+3. **M3 — Packaged demo:** D1–D4 — one-command-ish onboarding for new developers.  
+4. **M4 — Docs:** E — README + `compose/README.md`.
 
 ---
 
-## 9. Document control
+## 9. Pre-implementation checklist (tasks before coding)
+
+Complete these **in order** before opening large implementation PRs:
+
+| # | Task | Owner | Done when |
+|---|------|-------|-----------|
+| 1 | Confirm **Elasticsearch** Docker image acceptable for your org (license/legal) | Human | Email or ticket reference optional in README |
+| 2 | Create **implementation branch** from `main` (or agreed base) | Human / agent | Branch pushed |
+| 3 | **Freeze §3 decisions** or document overrides in a short `docs/ADR-000-demo-v1.md` (optional but recommended) | Human | ADR or explicit “no ADR” note in PR |
+| 4 | Add **Maven wrapper** (`mvnw`) if missing — reproducible CI | Agent | `./mvnw verify` works clean checkout |
+| 5 | Scaffold **empty** multi-module tree (A.1) and **CI** running `verify` on push | Agent | Green CI on skeleton |
+| 6 | Commit **topic names** and **JSON samples** for outbox / indexer in `shared-contracts` | Agent | Contract tests parse samples |
+| 7 | **Spike** (≤ 1 pd): local Debezium + PG `wal_level=logical` in throwaway compose — validate connector starts | Agent | Spike doc or comment in compose README |
+
+**After row 7:** proceed with **B.1** and **C.1** in parallel if two contributors; otherwise **B** then **C** to minimize risk.
+
+---
+
+## 10. Implementation backlog (for the coding agent — execute after §9)
+
+Present this as the **default execution order** for autonomous implementation (adjust if CI fails).
+
+| Order | Task ID | Description |
+|-------|---------|-------------|
+| 1 | A.1 | Parent POM, modules, `.gitignore`, GitHub Actions (or CI) `mvn -B verify` |
+| 2 | A.2 | Shared DTOs + JSON Schema or validation for indexer input |
+| 3 | A.3–A.5 | Three Boot services with health checks |
+| 4 | A.6 | Testcontainers for ES (and PG when JDBC lands) |
+| 5 | B.1–B.3 | Mapping, seed, query API + tests |
+| 6 | D0 | Infra-only Compose for PG+ES (optional but recommended before C) |
+| 7 | C.1–C.3 | Schema + transactional outbox + cleanup |
+| 8 | C.4–C.6 | Debezium + consumer + indexer + DLQ |
+| 9 | D.1–D.4 | Full `docker-compose.yml`, Dockerfiles, init scripts |
+| 10 | E.1–E.4 | README quickstart + compose README |
+
+**Stop points for human review:** after **B.3** (query contract), after **C.6** (first E2E), after **D.4** (demo UX).
+
+---
+
+## 11. Document control
 
 | Version | Date | Summary |
 |---------|------|---------|
-| 1.0 | 2025-03-27 | Initial plan: layers, stages, scope validation, contradictions, complexity (engineering units only). |
+| 1.0 | 2025-03-27 | Initial plan: layers, stages, scope, contradictions, T-shirt-only complexity. |
+| 1.1 | 2025-03-27 | Layer validation + Compose D0; frozen demo v1 decisions (**§3**); person-day + calendar **illustrative** estimates (**§7**); pre-implementation checklist + agent backlog (**§9–§10**). |

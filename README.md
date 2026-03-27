@@ -6,7 +6,19 @@ The design is **cloud-agnostic**. **Microsoft Azure** and **Google Cloud** integ
 
 ## Status
 
-**Planning only.** The full Spring Boot 3.x / Java 21 stack is **not implemented** in this branch yet. Stakeholder **feedback on the design** is expected before implementation.
+**Design complete; implementation not started.** The architecture and demo scope are documented in **SEARCH FEATURE.md** (especially **§15**, **§19**). **Demo v1 defaults** (search engine choice, document IDs, JSON payloads, indexer-owned enrichment) are **frozen** in [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md §3**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md#3-demo-v1-decisions-frozen-for-development) so development can begin without reopening those choices.
+
+Stakeholders may still adjust **non-demo** scope (cloud vendor, production HA, observability backends); track overrides in a short ADR or PR description if they change **§3** defaults.
+
+## Development
+
+| Step | Action |
+|------|--------|
+| 1 | Read **§9** (pre-implementation checklist) in [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md). |
+| 2 | Run the **implementation backlog (§10)** in order after the checklist is satisfied. |
+| 3 | Target **~26–49 person-days** for the full demo vertical slice (see plan **§7**); Stage **C** (ingest + Debezium + indexer) is the largest block. |
+
+**Local prerequisites (expected):** Docker with Compose, **≥ 16 GB RAM** recommended for Elasticsearch + Kafka + Connect on one host (**SEARCH FEATURE.md §19.2**).
 
 ## Demo and implementation scope
 
@@ -44,7 +56,7 @@ Industry-standard **OpenTelemetry** instrumentation in Spring Boot 3 (**Micromet
 
 | Document | Purpose |
 |----------|---------|
-| [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) | Staged implementation plan: Docker Compose demo layers, README milestones, scope validation, contradictions/gaps, complexity (engineering units) |
+| [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) | Validated layers, demo v1 decisions (**§3**), person-day estimates (**§7**), pre-implementation checklist (**§9**), agent backlog (**§10**), Compose **D0** vs full stack |
 | [**SEARCH FEATURE.md**](./SEARCH%20FEATURE.md) | Full design: **§3.4–§3.5** industry parallels & anti-pattern validation, **§16** defaults, **§17** effort, **§18** observability, **§19** Docker Compose, **§20** Kubernetes, **§21** Azure & GCP, CDC (§6), refresh, topics, Hadoop, testing |
 
 ## Industry alignment (summary)
