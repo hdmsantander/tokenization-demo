@@ -7,6 +7,7 @@ This document plans **staged, incremental work** to deliver the **local search d
 | Document | Role |
 |----------|------|
 | [README.md](./README.md) | Entry point; status, summaries, links |
+| [docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md) | **Current vs next step**, delivery flow, first-draft ecosystem inventory |
 | [SEARCH FEATURE.md](./SEARCH%20FEATURE.md) | Full architecture; **§15** phases, **§17** relative effort (T-shirt), **§19** Compose scope |
 
 ---
@@ -15,10 +16,25 @@ This document plans **staged, incremental work** to deliver the **local search d
 
 | Aspect | State |
 |--------|--------|
-| Implementation | **None** — docs and license only |
+| **You are here** | **End of Stage A (foundations)** → **next: Stage B (read path)** — see **[docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md)** |
+| Implementation | **First draft ecosystem:** Maven multi-module skeleton, JSON Schema contracts + tests, three Boot services (health + meta), Testcontainers ES/PG, **D0** Compose, scripts, CI |
+| Stage A detail | **A.1–A.3, A.5, A.6** done; **A.4** skeleton only (Kafka listener stub deferred to B-prep or **C.5** — see **IMPLEMENTATION.md §1**) |
+| Stage D detail | **D0** (`compose/docker-compose.infra.yml`) done; **D1** (Kafka + Connect + apps) not started |
 | Authoritative demo spec | **SEARCH FEATURE.md §19.1–§19.3** |
 
-**Implication:** All layers below are **greenfield**; the demo is the **integration spine** that proves each layer.
+**Implication:** Layer **1** is **substantially complete**; the **integration spine** for ingest (Kafka/Debezium) is still ahead (**Stage C** + **D1**).
+
+### 1.1 Execution flow (current vs next)
+
+```text
+[Done] A.1–A.3, A.5, A.6  →  [Done] D0 (infra Compose)
+                              ↓
+[Next] B.1 → B.2 → B.3  →  (optional B.4, optional A.4 listener stub)
+                              ↓
+[Later] C.1–C.6  →  D1–D4  →  E refresh
+```
+
+Milestone alignment: **M1 (Queryable index)** in progress — **A done**, **B not started**.
 
 ---
 
@@ -83,7 +99,7 @@ These defaults unblock implementation; revisit only if compliance or licensing f
 | A.1 | Parent POM (Java 21, Spring Boot 3.2+), modules per **§12**, CI workflow (`mvn verify`) | M | — |
 | A.2 | `shared-contracts`: JSON Schema (or records) for **unwrapped** outbox / `IndexItem` payloads | M | A.1 |
 | A.3 | `search-query-service`: Boot app, health, actuator, config profiles | M | A.1 |
-| A.4 | `search-indexer-service`: Boot app + Kafka listener stub (no ES yet) | M | A.1, A.2 |
+| A.4 | `search-indexer-service`: Boot app + Kafka listener stub (no ES yet). **Status:** Boot app only; listener stub optional before **B** or with **C.5** ([IMPLEMENTATION.md](./docs/IMPLEMENTATION.md)). | M | A.1, A.2 |
 | A.5 | `inventory-api-service`: Boot app + REST stub | S–M | A.1 |
 | A.6 | Testcontainers: ES (+ PG when inventory uses JDBC) | M | A.3+ |
 
@@ -125,7 +141,7 @@ These defaults unblock implementation; revisit only if compliance or licensing f
 
 | ID | Deliverable | Complexity | Depends on |
 |----|-------------|------------|------------|
-| **D0** | **`docker-compose.infra.yml`** or profile: **PG + ES (+ Redis)** for local dev / Stage B demos | S–M | B.1 (for ES) |
+| **D0** | **`docker-compose.infra.yml`**: **PG + ES (+ Redis)** for local dev / Stage B demos. **Status: done** (usable before **B** for infra). | S–M | B.1 (for ES) |
 | D.1 | **`docker-compose.yml`**: PG, Kafka (KRaft **§19.1**), Connect+Debezium, ES, Redis | M | C.4 |
 | D.2 | Multi-stage **Dockerfiles** per Spring service | S | A.* |
 | D.3 | `application-docker.yml` / env; Compose DNS names **§19.2** | M | D.1 |
@@ -232,12 +248,12 @@ Complete these **in order** before opening large implementation PRs:
 | 1 | Confirm **Elasticsearch** Docker image acceptable for your org (license/legal) | Human | Email or ticket reference optional in README |
 | 2 | Create **implementation branch** from `main` (or agreed base) | Human / agent | Branch pushed |
 | 3 | **Freeze §3 decisions** or document overrides in a short `docs/ADR-000-demo-v1.md` (optional but recommended) | Human | ADR or explicit “no ADR” note in PR |
-| 4 | Add **Maven wrapper** (`mvnw`) if missing — reproducible CI | Agent | `./mvnw verify` works clean checkout |
-| 5 | Scaffold **empty** multi-module tree (A.1) and **CI** running `verify` on push | Agent | Green CI on skeleton |
-| 6 | Commit **topic names** and **JSON samples** for outbox / indexer in `shared-contracts` | Agent | Contract tests parse samples |
-| 7 | **Spike** (≤ 1 pd): local Debezium + PG `wal_level=logical` in throwaway compose — validate connector starts | Agent | Spike doc or comment in compose README |
+| 4 | Add **Maven wrapper** (`mvnw`) if missing — reproducible CI | Agent | **Done** |
+| 5 | Scaffold **empty** multi-module tree (A.1) and **CI** running `verify` on push | Agent | **Done** |
+| 6 | Commit **topic names** and **JSON samples** for outbox / indexer in `shared-contracts` | Agent | **Done** (schemas + fixtures; topic names with **C/D1**) |
+| 7 | **Spike** (≤ 1 pd): local Debezium + PG `wal_level=logical` in throwaway compose — validate connector starts | Agent | **Not done** — D0 Postgres already uses `wal_level=logical`; full Debezium spike remains with **C.4** / **D1** |
 
-**After row 7:** proceed with **B.1** and **C.1** in parallel if two contributors; otherwise **B** then **C** to minimize risk.
+**After row 7:** proceed with **B.1**–**B.3** next; **C.1** can start in parallel if two contributors and contracts stay stable.
 
 ---
 
@@ -247,12 +263,12 @@ Present this as the **default execution order** for autonomous implementation (a
 
 | Order | Task ID | Description |
 |-------|---------|-------------|
-| 1 | A.1 | Parent POM, modules, `.gitignore`, GitHub Actions (or CI) `mvn -B verify` |
-| 2 | A.2 | Shared DTOs + JSON Schema or validation for indexer input |
-| 3 | A.3–A.5 | Three Boot services with health checks |
-| 4 | A.6 | Testcontainers for ES (and PG when JDBC lands) |
-| 5 | B.1–B.3 | Mapping, seed, query API + tests |
-| 6 | D0 | Infra-only Compose for PG+ES (optional but recommended before C) |
+| 1 | A.1 | Parent POM, modules, `.gitignore`, GitHub Actions (or CI) `mvn -B verify` — **done** |
+| 2 | A.2 | Shared DTOs + JSON Schema or validation for indexer input — **done** |
+| 3 | A.3–A.5 | Three Boot services with health checks — **done** (A.4 listener stub: **optional** now or at C.5) |
+| 4 | A.6 | Testcontainers for ES (and PG when JDBC lands) — **done** |
+| 5 | B.1–B.3 | Mapping, seed, query API + tests — **next** |
+| 6 | D0 | Infra-only Compose for PG+ES — **done** |
 | 7 | C.1–C.3 | Schema + transactional outbox + cleanup |
 | 8 | C.4–C.6 | Debezium + consumer + indexer + DLQ |
 | 9 | D.1–D.4 | Full `docker-compose.yml`, Dockerfiles, init scripts |
@@ -269,3 +285,4 @@ Present this as the **default execution order** for autonomous implementation (a
 | 1.0 | 2025-03-27 | Initial plan: layers, stages, scope, contradictions, T-shirt-only complexity. |
 | 1.1 | 2025-03-27 | Layer validation + Compose D0; frozen demo v1 decisions (**§3**); person-day + calendar **illustrative** estimates (**§7**); pre-implementation checklist + agent backlog (**§9–§10**). |
 | 1.2 | 2025-03-27 | **Execution started:** Maven multi-module skeleton (`shared-contracts`, three Boot services), JSON Schema contracts + tests, Testcontainers ES/PG smoke, `compose/docker-compose.infra.yml`, `scripts/onboard.sh` + `validate-infra.sh`, Maven Wrapper, GitHub Actions `mvn verify`. |
+| 1.3 | 2025-03-27 | **Flow update:** section **1** current state + ASCII flow; **D0** and backlog rows 1–4,6 marked **done**; **A.4** partial note; checklist **§9** rows 4–6 done; row 7 reframed; **[docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md)** added as operational guide. |

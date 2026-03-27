@@ -1,8 +1,10 @@
 # Local infrastructure (Compose)
 
+Part of the **first-draft ecosystem**; see [**docs/IMPLEMENTATION.md**](../docs/IMPLEMENTATION.md) for **current vs next** implementation steps and how D0 fits the delivery flow.
+
 ## `docker-compose.infra.yml` (D0)
 
-PostgreSQL 16 (**`wal_level=logical`** for future Debezium), Elasticsearch 8.12, Redis 7. Used for read-path development and OLTP prep before Kafka is introduced.
+PostgreSQL 16 (**`wal_level=logical`** for future Debezium), Elasticsearch 8.12, Redis 7. Used for read-path development (**Stage B** next) and OLTP prep before Kafka is introduced (**Stage D1**).
 
 ```bash
 # From repository root
