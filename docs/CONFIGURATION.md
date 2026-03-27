@@ -83,6 +83,8 @@ Relaxed binding applies (e.g. `GROCERY_KAFKA_BOOTSTRAP_SERVERS` → `grocery.kaf
 ## 5. Validation
 
 - **Automated:** `search-query-service` tests `SharedConfigIntegrationTest` and `SharedConfigDockerProfileTest` assert resolved `grocery.*` values and `spring.docker.compose.enabled=false`.
+- **`shared-config`:** `GroceryDefaultsResourceTest` asserts `grocery-defaults.yml` is packaged.
+- **`inventory-api-service`:** `PostgresInfraIntegrationTest` uses Testcontainers; **`org.postgresql:postgresql` (test scope)** is required because Testcontainers does not ship the JDBC driver.
 - **Manual:** After `docker compose -f compose/docker-compose.infra.yml up -d`, run a service with `-Dspring-boot.run.profiles=docker` and confirm logs show expected URIs (no connection required for skeleton).
 
 ---
