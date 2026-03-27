@@ -1,0 +1,4 @@
+# Used with compose/docker-compose.infra.yml — hostnames match Compose service names.
+spring:
+  elasticsearch:
+    uris: http://elasticsearch:9200
