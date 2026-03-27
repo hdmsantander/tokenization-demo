@@ -1,6 +1,6 @@
 # Grocery Item Search — Architecture & Delivery Plan
 
-This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth**, **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, and a phased rollout. **Implementation is intentionally deferred** until stakeholders review and align on scope.
+This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, phased rollout, and **relative effort** for key features. **Implementation is intentionally deferred** until stakeholders review and align on scope.
 
 ---
 
@@ -12,7 +12,7 @@ This document describes a **planned** software stack and data flows for a **natu
 | **Tokenization-first** | Similar in spirit to large-scale search: **analyze** queries and documents consistently (normalization, stemming/lemmatization where appropriate, stopwords, language-aware tokenizers), build **inverted indexes**, score with **BM25** (or learned rank later). Elasticsearch provides this out of the box; custom **synonym / entity** layers sit beside it. |
 | **Real time** | Inventory changes should become **search-visible within seconds** under normal load (tunable vs. cost). |
 | **Scale** | Design for **millions of concurrent end users** (read-heavy): horizontally scaled stateless APIs, Elasticsearch cluster, Kafka, caches, and optional regional replication. |
-| **Ease of updates** | **CDC-driven** incremental index updates; **bulk** paths for cold start and disaster rebuild; clear separation of **source of truth** (OLTP) vs. **search index**. |
+| **Ease of updates** | **Transactional outbox** in the inventory service (same database transaction as business writes) + **Debezium** (Kafka Connect) for log-based CDC into **Kafka**, then incremental index updates; **bulk** paths for cold start and disaster rebuild; clear separation of **source of truth** (OLTP) vs. **search index**. |
 | **Hadoop when the problem needs it** | Use **HDFS (or cloud object store with Hadoop-compatible APIs)** and **Spark/Flink** for **large-scale snapshotting, reconciliation, feature generation, and full rebuilds**—not as decoration, but wherever volume, audit, or ML pipelines exceed what streaming microservices alone should carry. |
 
 **Non-goals (initial phase):** Replacing the inventory OLTP database; building a general-purpose web crawler; full semantic/vector-only search (can be phase 2+).
@@ -39,8 +39,8 @@ flowchart TB
 
   subgraph IngestPlane["Ingestion & CDC plane"]
     INV[inventory-api-service]
-    OLTP[(OLTP DB e.g. PostgreSQL)]
-    CDC[CDC capture see Section 6]
+    OLTP[(OLTP DB + transactional outbox)]
+    CDC[Debezium Kafka Connect]
     KAFKA[(Kafka)]
     IDX[search-indexer-service]
     ENR[enrichment-tokenization-worker]
@@ -76,7 +76,7 @@ flowchart TB
 
 | Service | Role |
 |---------|------|
-| **inventory-api-service** | CRUD and transactional inventory; owns validation and business rules; writes only to OLTP. |
+| **inventory-api-service** | CRUD and transactional inventory; owns validation and business rules; persists business rows **and** **outbox events** in the **same local transaction** (transactional outbox). |
 | **search-query-service** | Stateless query API: parse request → optional query rewriting → ES query DSL → merge filters → rank → cache keying; no direct OLTP reads for search. |
 | **search-indexer-service** | Consumes normalized **index commands** from Kafka; bulk-upserts to Elasticsearch; handles retries, idempotency, version/tombstones. |
 | **enrichment-tokenization-worker** (may be merged with indexer in v1) | Maps CDC events to **search documents**; applies **synonyms**, department hierarchy, recipe/ingredient expansion (if configured); outputs compact **IndexItem** payloads. |
@@ -99,7 +99,7 @@ Retail, marketplace, and “catalog + search” systems commonly converge on a s
 | **Data lake for scale and history** | **HDFS or object store** + **Spark/Flink** for snapshots, training data, reconciliation | Streaming alone is poor at **petabyte-scale history**, cheap retention, and **batch diff** across billions of rows. |
 | **API + gateway** | **Spring Cloud Gateway** / Envoy / cloud API gateways | Cross-cutting auth, rate limits, and routing in microservice estates. |
 
-Published walkthroughs and practitioner posts often describe **PostgreSQL → Debezium → Kafka → Spring consumers → Elasticsearch** as a reference pipeline for real-time sync; that aligns with this design but is **not** the only enterprise-grade capture path (see §6.4).
+This program **standardizes** on **PostgreSQL (or chosen OLTP) → transactional outbox table → Debezium → Kafka → Spring consumers → Elasticsearch**, which matches common microservice practice (reliable publication without dual writes). §6.5 documents **escape hatches** if a vendor mandates a different capture product feeding the same Kafka topics (Debezium remains the **default implementation**).
 
 ### 3.2 Open-source anchor vs proprietary overlay
 
@@ -107,11 +107,11 @@ Published walkthroughs and practitioner posts often describe **PostgreSQL → De
 |-------|------------------|--------------------------------------|
 | Messaging | **Apache Kafka** | Confluent Platform, MSK, managed Kafka |
 | Search | **Elasticsearch** or **OpenSearch** | Elastic Cloud, AWS OpenSearch Service |
-| CDC capture | **Debezium** | GoldenGate, Qlik Replicate, Striim, cloud-native CDC |
+| CDC capture | **Debezium on Kafka Connect** (**decided**) | Managed Connect / Confluent; escape hatch: vendor CDC → Kafka if mandated (§6.5) |
 | Batch | **Apache Spark**, **Apache Flink**, **Hadoop HDFS** | Databricks, EMR, Dataproc, Cloudera |
 | Service stack | **Spring Boot**, **Spring Cloud** | Commercial support, enterprise support contracts |
 
-**Long-term use:** Favor **open protocols** (Kafka, JDBC, ES HTTP APIs) and **schema evolution** (Avro/Protobuf + registry) so capture technology can change (e.g. Debezium → managed CDC) without rewriting consumers—as long as the **contract topic** (`search.item.enriched` or outbox topic) stays stable.
+**Long-term use:** Favor **open protocols** (Kafka, JDBC, ES HTTP APIs) and **schema evolution** (Avro/Protobuf + registry). The **decided** path is **outbox + Debezium**; if operations later prefer **managed** Connect, the **same** Debezium connector model usually applies. Downstream consumers stay stable as long as the **contract topics** (`inventory.outbox.events` → `search.item.enriched`) and **payload schema** evolve compatibly.
 
 ### 3.3 System weaknesses and scale issues (architectural)
 
@@ -175,15 +175,30 @@ Detailed **refresh semantics** (Elasticsearch `refresh`, bulk tuning, staleness)
 
 ## 6. Change Data Capture (CDC) — In Depth
 
+### 6.0 Architectural decision: transactional outbox + Debezium
+
+**Decision (locked for this program):**
+
+| Layer | Choice |
+|-------|--------|
+| **Publication from inventory** | **Transactional outbox** — `inventory-api-service` inserts **one row per domain event** (or batched payload) into an **`outbox`** table in the **same database transaction** as the business mutation. No “dual write” to Kafka from the app. |
+| **Capture into Kafka** | **Debezium** running on **Kafka Connect**, reading the database **transaction log** (e.g. PostgreSQL logical decoding) and emitting change events for the outbox table (and any other captured tables per connector config). |
+| **Downstream** | **Spring Kafka** consumers (enrichment, indexer) remain **agnostic** to whether the row was an outbox insert or a raw table change—they only see **Kafka records**. |
+
+**Why outbox + Debezium together:** The outbox **defines the public integration contract** (event type, schema version, payload) and **hides** internal normalized tables from search. Debezium provides **durable, low-latency, log-based** delivery to Kafka with a **well-understood** operational model in Spring + Kafka estates.
+
+**Operational note:** After Kafka has acknowledged a message, a **separate process** (relay, or Debezium **outbox event router** / custom SMT, or periodic cleanup job) should **mark or delete** processed outbox rows to avoid unbounded table growth—design this explicitly in Phase 1.
+
 ### 6.1 What “CDC” means in this system
 
-**CDC** is the continuous extraction of **committed** changes (insert, update, delete) from the **system of record** (OLTP) and their reliable delivery to downstream **derived views** (here: the search index and optional data lake).
+**CDC** is the continuous extraction of **committed** changes from the **system of record** (OLTP) and their reliable delivery to downstream **derived views** (here: the search index and optional data lake). In this architecture, the **primary** change stream for search is **outbox inserts/updates**, not ad hoc “CDC every internal column” unless you explicitly add tables to the connector for enrichment.
 
 **Properties we care about:**
 
-- **Low impact on OLTP:** Prefer **log-based** capture (WAL / binlog) over high-frequency polling.
-- **Ordering per aggregate:** All mutations for one **search document** (e.g. `store_id + sku`) should be **processable in order** or **mergeable** via a version.
-- **Deletes:** Hard deletes must surface as **tombstones** or **delete events**; soft deletes as field updates.
+- **Low impact on OLTP:** **Log-based** capture via Debezium (WAL / binlog), not polling-heavy patterns on hot tables.
+- **Atomicity with business state:** Outbox row and business row share **one commit** → no lost events if the transaction rolls back.
+- **Ordering per aggregate:** Kafka **partition key** = **`document_id`** (or stable hash) derived from the outbox payload (see §6.3).
+- **Deletes:** Represent as **outbox events** (`ItemDeleted`, `StoreOfferWithdrawn`) rather than relying on capture of physical deletes of internal tables when possible; soft deletes become **UPSERT** events with `active: false`.
 - **Recoverability:** Kafka retention + (optional) lake copy allows **replay** after consumer bugs.
 
 ### 6.2 End-to-end CDC process (step-by-step)
@@ -191,31 +206,32 @@ Detailed **refresh semantics** (Elasticsearch `refresh`, bulk tuning, staleness)
 ```mermaid
 sequenceDiagram
   participant App as inventory-api-service
-  participant DB as OLTP
-  participant Cap as CDC capture
+  participant DB as OLTP + outbox table
+  participant Cap as Debezium Connect
   participant K as Kafka
   participant Enr as enrichment-worker
   participant Idx as search-indexer-service
   participant ES as Elasticsearch
   participant Lake as HDFS / object store
 
-  App->>DB: COMMIT business row(s)
-  DB-->>Cap: WAL / log record
-  Cap->>K: serialized change event
-  Note over Cap,K: Partition by document_id / sharding key
-  K->>Enr: consume (optional transform)
+  App->>DB: BEGIN; UPDATE inventory…; INSERT outbox(payload); COMMIT
+  DB-->>Cap: WAL record(s) for committed tx
+  Cap->>K: Debezium change event(s) for outbox row
+  Note over Cap,K: Extract document_id → Kafka record key
+  K->>Enr: consume outbox topic (optional transform)
   Enr->>K: IndexCommand topic
   K->>Idx: consume
   Idx->>ES: index / delete / bulk
   Idx->>Lake: optional append event archive
 ```
 
-1. **Transaction commit** on OLTP persists authoritative state.
-2. **Capture agent** reads the **logical log** (PostgreSQL logical decoding, MySQL binlog, SQL Server CDC, etc.) and emits a **canonical event** (row image + op + position/LSN/scn).
-3. **Broker** (Kafka) **durably stores** the event with replication (`acks=all` where required).
-4. **Enrichment** (optional but typical): join reference data, apply synonyms, build the **search document**; may **fan out** one row change into multiple documents (e.g. denormalized store offers).
-5. **Indexer** applies **idempotent** upsert/delete to Elasticsearch using a **version** or **sequence** from the source.
-6. **Archive (recommended at scale):** append the same event stream (or compacted summary) to **HDFS/S3** for **replay**, **audit**, and **Spark** jobs—so operational mistakes do not require re-reading the production DB.
+1. **Single transaction** persists business data and the **outbox event** row(s).
+2. **Debezium** tails the log and emits events (typically **one Debezium envelope per outbox row insert**). Use **single message transforms (SMTs)** or a **small relay consumer** to unwrap the outbox payload into the **canonical Kafka value** if you want topics to contain only business JSON/Avro.
+3. **Kafka** stores the record with replication (`acks=all` where required); **partition key** must be derived consistently for ordering (§6.3).
+4. **Enrichment** (optional): expand references, synonyms, or merge with read models; produce **`search.item.enriched`**.
+5. **Indexer** applies **idempotent** upsert/delete to Elasticsearch using **`event_version`** or **`monotonic_seq`** carried in the outbox payload.
+6. **Archive (recommended at scale):** mirror events to **HDFS/S3** for **replay**, **audit**, and **Spark** jobs.
+7. **Outbox cleanup:** after successful publish (or via tombstone strategy), remove or mark outbox rows per retention policy.
 
 ### 6.3 Sharding strategy (CDC-specific)
 
@@ -228,7 +244,7 @@ Sharding here means: **how to split the firehose** so that ordering, parallelism
 | **Partition key** | **`document_id`** (e.g. `tenant:storeId:sku` or hash thereof). Guarantees **per-document ordering** if producers use the same key. |
 | **Partition count** | Set from **peak sustained write RPS** and **desired consumer parallelism**, not from catalog size alone. Rebalancing partitions is painful—start with headroom (e.g. 2–4× current indexer instances). |
 | **Co-partitioning** | If enrichment produces to `search.item.enriched`, use the **same key** so a **single-threaded consumer per partition** can assume locality (or use **Kafka Streams** / **Flink** with consistent keying). |
-| **Multi-table CDC** | If one item spans tables (`item`, `price`, `location`), either: **emit a merged view** from a DB join (materialized view + CDC on the view where supported), **single outbox** written in the same transaction (§6.4), or **enrichment** that buffers partial state with **state store** (Flink) — complexity rises quickly; prefer **outbox** or **denormalized CDC table** for clarity. |
+| **Multi-table / multi-aggregate** | Prefer **one outbox event** per business use case that already reflects the **search document** (or a clear delta). If internal tables must stay separate, either **emit multiple coordinated outbox events** in one TX with shared **`correlation_id`**, or use **enrichment** with a **state store** (Flink)—higher complexity. |
 
 #### 6.3.2 Hotspot mitigation
 
@@ -244,36 +260,37 @@ Sharding here means: **how to split the firehose** so that ordering, parallelism
 
 Use **`routing`** (same value as Kafka key where possible) so **co-located shards** reduce scatter-gather for **per-store** queries. Do **not** overuse custom routing without measuring — it can create **uneven shard sizes**.
 
-### 6.4 Alternatives to Debezium (enterprise-grade comparison)
+### 6.4 Debezium in the stack (components and responsibilities)
 
-Debezium is a strong **default** in Kafka-centric, open-source estates. Senior architecture still **validates** it against alternatives because **vendor DB support**, **SRE model**, **compliance**, and **cloud anchor** differ by enterprise.
+| Component | Responsibility |
+|-----------|----------------|
+| **Kafka Connect cluster** | Runs **Debezium** connector(s); HA Connect workers; connector config in Git / ConfigMaps. |
+| **Debezium connector** | Captures **outbox** table (and optionally reference tables if justified); emits to **`inventory.outbox.events`** (or single DB server topic with SMT routing). |
+| **Schema Registry** | Registers **Avro** (recommended) or **JSON Schema** for outbox payload after unwrap, and for **`search.item.enriched`**. |
+| **SMT / relay (optional)** | Unwraps Debezium envelope to **plain business event**; sets **Kafka key** from `document_id` inside payload. |
+| **Spring services** | **Do not** embed Debezium; they consume/produce Kafka only. |
 
-| Option | Mechanism | Strengths | Weaknesses / caveats | Typical real-world use |
-|--------|-----------|-----------|----------------------|-------------------------|
-| **Debezium (Kafka Connect)** | Log-based CDC to Kafka | Open source, large community, fits **Spring + Kafka** microservices; **Testcontainers** support | Operate Connect cluster; DB-specific setup (slots, retention); schema evolution discipline | Greenfield event pipelines, Kubernetes-native shops |
-| **Transactional outbox + Debezium** | App writes **outbox** row in same TX as business data; CDC reads outbox | **Clean bounded context**; no exposing internal table shapes; great **microservices** fit | App must write outbox; **payload size** discipline | **Recommended** when multiple downstreams consume events |
-| **Oracle GoldenGate / MS SQL CDC + proprietary** | Vendor log capture | Mature for Oracle/SQL Server; enterprise support | Cost; often needs **translation** layer to Kafka | Large enterprises on Oracle/SQL Server |
-| **AWS DMS** | Log or polling → Kinesis / Kafka / S3 | Managed, AWS integration | Historically **migration-first** semantics; latency and features vary by endpoint—not always equivalent to purpose-built streaming CDC | AWS-heavy footprints, hybrid replication |
-| **Google Cloud Datastream** | Log-based → BigQuery / GCS / Dataflow | Serverless, low ops for GCP | **Kafka not always first-class destination**; may need **Dataflow** template to bridge | GCP-native data platforms |
-| **Azure Data Factory / Synapse Link / SQL CDC** | Platform-specific | Good if anchored in Azure | Bridge to Kafka may add hops | Microsoft-centric estates |
-| **Qlik Replicate / Striim / Equalum / etc.** | Commercial CDC + routing | GUI ops, heterogeneous routes | Licensing; less “pure OSS” inner loop | Enterprises buying supported heterogeneous CDC |
-| **Airbyte / Fivetran / Estuary** | ELT / sync engines | Fast time-to-pipeline for analytics | **Not a drop-in replacement** for low-latency OLTP→search in all cases; check **delete** handling and latency | Analytics replicas more than millisecond search |
-| **JDBC polling (`updated_at`)** | Poll queries | Simple to test | Misses deletes unless soft-delete; higher DB load; lag | Small catalogs or temporary bridge only |
+**Compatibility:** Debezium **PostgreSQL** connector requires **`wal_level=logical`**, a **replication slot**, and operational discipline on **disk** and **slot lag** (monitoring alerts when Connect is down).
 
-**Wiser enterprise choice (summary):**
+### 6.5 Escape hatches if Debezium cannot run (comparison only)
 
-- **Kafka-native microservices + OSS preference:** **Debezium** or **Confluent connectors** (often Debezium under the hood) + strong **Schema Registry** governance.
-- **Strict domain boundaries + multiple consumers:** **Transactional outbox** table in the inventory service, captured by Debezium (or equivalent), so **internal schema** is not leaked to search.
-- **Oracle/SQL Server strategic standard:** **GoldenGate / vendor CDC** → **Kafka** (via adapters) when DBAs mandate it; keep **consumer contract** identical to the Debezium path.
-- **Cloud-only, minimal ops:** **Managed CDC** (DMS, Datastream, etc.) → **object store / Pub-Sub** → **small bridge service** into Kafka if the org standard is still Kafka for microservices.
+**Standard for this repo:** **Transactional outbox + Debezium on Kafka Connect.** The table below is for **exceptional** enterprise constraints (e.g. DBA mandate, unsupported topology). If you switch capture, **preserve** the **outbox table** and **Kafka topic contracts** so Spring consumers are unchanged.
 
-### 6.5 Compatibility with existing microservices environments
+| Option | When to consider | Implication |
+|--------|------------------|-------------|
+| **Confluent Cloud / MSK Connect (managed Debezium)** | Same pattern, less Connect SRE toil | Same connector semantics; vendor SLAs |
+| **Oracle GoldenGate / Qlik / Striim → Kafka** | Mandated vendor CDC | Bridge to **same** topic names and schemas; extra licensing and mapping layer |
+| **AWS DMS → Kafka / Kinesis** | AWS-only shop, managed preference | Validate **latency**, **delete** semantics, and **transform** limits vs Debezium |
+| **GCP Datastream → GCS / BigQuery → bridge** | GCP anchor | Usually **extra hop** to Kafka; only if platform standard forbids self-managed Connect |
+| **JDBC polling on outbox** | Temporary / dev-only | Higher DB load; use only short term |
+
+### 6.6 Compatibility with existing microservices environments
 
 - **Service mesh / discovery:** CDC consumers are just **more Kafka consumer groups**; they honor the same **config server**, **secrets**, and **observability** as other Spring services.
 - **Multi-team ownership:** Define **data contracts** at the **`search.item.enriched`** boundary; inventory team owns **outbox** or **CDC source** quality; search team owns **mapping** and ES health.
 - **Feature flags:** New fields flow **schema version** in Avro; old indexers **ignore** unknowns until rollout.
 
-### 6.6 Testing strategy (CDC-aware)
+### 6.7 Testing strategy (CDC-aware)
 
 | Test type | Approach |
 |-----------|----------|
@@ -284,19 +301,39 @@ Debezium is a strong **default** in Kafka-centric, open-source estates. Senior a
 
 Avoid relying solely on **mocks** for CDC: the failure modes are **ordering**, **duplicates**, and **late schema** — integration tests should exercise those.
 
-### 6.7 Event shapes (reference)
+### 6.8 Event shapes (reference)
 
-**Raw CDC envelope (illustrative):**
+**Outbox row (written by `inventory-api-service`, same TX as business data):**
+
+| Column | Purpose |
+|--------|---------|
+| `id` | UUID primary key |
+| `aggregate_type` | e.g. `InventoryItem` |
+| `aggregate_id` | Business id for debugging |
+| `type` | Event type, e.g. `ItemSearchUpsert`, `ItemSearchDelete` |
+| `payload` | **JSON or Avro binary** — canonical fields for search pipeline |
+| `created_at` | Server timestamp |
+
+**After unwrap (Kafka value on `inventory.outbox.unwrapped` or primary consumer topic), illustrative:**
 
 ```json
 {
-  "op": "u",
-  "ts_ms": 1712345678901,
-  "source": { "table": "inventory_item", "lsn": "0/1A2B3C" },
-  "before": { "price": 1.99 },
-  "after": { "id": "uuid", "store_id": "s1", "name": "...", "department_id": "dairy", "description": "...", "version": 42 }
+  "event_type": "ItemSearchUpsert",
+  "schema_version": 3,
+  "document_id": "tenant1:s42:sku123",
+  "seq": 9001,
+  "occurred_at": "2025-03-27T12:00:00Z",
+  "data": {
+    "name": "...",
+    "description": "...",
+    "department_id": "dairy",
+    "store_id": "s42",
+    "active": true
+  }
 }
 ```
+
+**Debezium envelope** still wraps the above at the connector output until an SMT/relay strips metadata—**do not** couple indexer tests to raw envelope fields; test the **unwrapped** contract.
 
 **Internal IndexCommand:**
 
@@ -360,7 +397,8 @@ This closes the gap when **consumer bugs**, **DLQ replays**, or **partial failur
 
 | Topic | Content | Notes |
 |-------|---------|--------|
-| `inventory.cdc.raw` or `inventory.outbox.events` | Debezium envelope or outbox payload | Retention per compliance; **outbox** preferred for microservice encapsulation |
+| `inventory.outbox.events` | Debezium change events for **outbox** table (unwrap downstream) | **Primary** ingress topic; retention per compliance; partition key from **`document_id` in payload** (after unwrap) |
+| `inventory.outbox.events.dlq` (optional) | Bad records from unwrap/validation | Inspect and replay after fix |
 | `search.item.enriched` | Normalized search docs / commands | Avro + **Schema Registry**; **partition = document_id** |
 | `search.index.dlq` | Failed applies | Replay tooling; alert on growth |
 | `search.events.archive` (optional) | Copy for lake | Compact or time-partitioned in HDFS for **replay** |
@@ -458,8 +496,9 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 | Risk | Mitigation |
 |------|------------|
 | **Schema drift** between OLTP and ES | Versioned **IndexCommand** schema; contract tests; feature flags for new fields. |
-| **Large catalog bulk loads** | Throttle CDC or pause capture; use **bulk + Hadoop** path; monitor **Kafka lag**. |
-| **Delete propagation** | Hard deletes must emit **tombstones**; soft deletes map to `active:false` filter. |
+| **Large catalog bulk loads** | Throttle or pause **Debezium** connector; use **bulk + Hadoop** path; monitor **Kafka lag** and **replication slot lag**. |
+| **Delete propagation** | Emit **`ItemSearchDelete`** (or equivalent) **outbox events**; avoid relying on physical deletes of internal tables for downstream sync. Soft deletes: **UPSERT** with `active:false`. |
+| **Outbox table growth** | **Cleanup** after confirmed Kafka publish (relay + idempotency); partition or archive old rows; alert on table size. |
 | **Over-tokenization** | Too aggressive stemming merges distinct products (“mint” gum vs herb); tune analyzers per field. |
 | **Recipe NL ambiguity** | Use **department boosts**, **user context**, **click feedback** later. |
 | **Cache poisoning** | Strict cache key dimensions; WAF + input length limits. |
@@ -472,7 +511,7 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 ## 15. Phased Delivery Plan (Post-Feedback)
 
 1. **Phase 0 — Foundations:** Parent POM, **search-query-service** skeleton, ES cluster (dev), sample index mapping, **Testcontainers** ES + Redis tests.
-2. **Phase 1 — CDC path:** Choose capture (Debezium vs enterprise); Kafka topics; indexer + DLQ; measure **lag percentiles**.
+2. **Phase 1 — Outbox + Debezium:** Outbox schema and writes in **inventory-api-service**; **Kafka Connect + Debezium** connector; unwrap/SMT or relay; **`search.item.enriched`** + **indexer** + DLQ; measure **lag percentiles** and **slot lag**.
 3. **Phase 1b — Lake (when catalog or audit needs it):** Archive topic to **HDFS/S3**; document **replay** procedure.
 4. **Phase 2 — NL quality:** Synonyms, department hierarchy, autocomplete; Redis caching with safe keys.
 5. **Phase 3 — Recipe / ingredients + batch features:** Spark jobs from lake for enrichment signals.
@@ -485,15 +524,41 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 - OLTP engine (PostgreSQL vs Oracle vs SQL Server) and **expected catalog size** (SKUs × stores).
 - **Freshness SLA** (e.g. “99% of updates visible within 5s”) vs cost.
 - **Single vs multi-tenant** search (per retailer vs platform).
-- **Managed vs self-hosted** Kafka, ES, and CDC capture.
-- **Mandatory enterprise CDC** (GoldenGate, etc.) vs **Debezium** standard.
+- **Managed vs self-hosted** Kafka, Elasticsearch, and **Kafka Connect** (self-managed Debezium vs Confluent Cloud / MSK Connect).
+- Whether any **mandated vendor CDC** requires the §6.5 **escape hatch** (topics and schemas unchanged).
 - **Retention and compliance** driving **Hadoop/lake** in phase 1 vs phase 1b.
 
 ---
 
-## 17. Document Control
+## 17. Key features — relative effort (engineering units)
+
+Effort is expressed as **T-shirt size** for a **mature team** already familiar with Spring and Kafka. Sizes mean: **S** = small isolated change, **M** = multiple components or moderate unknowns, **L** = broad surface area or hard non-functionals, **XL** = program-level (many teams, long-lived operational burden). **Not calendar estimates.**
+
+| Feature / deliverable | Size | Primary scope |
+|----------------------|------|----------------|
+| Parent POM, conventions, shared **Avro** modules | **S** | Build, CI, `shared-contracts` |
+| **search-query-service** skeleton + ES mapping + health | **M** | Boot app, ES client, Docker/Testcontainers smoke |
+| **Transactional outbox** table + write path in inventory API | **M** | DB migration, TX boundary, event builders, payload caps |
+| **Debezium** connector + Connect HA + PostgreSQL **logical replication** | **M–L** | Slots, monitoring, playbook for connector pause/failover |
+| Unwrap pipeline (**SMT** or small **relay** consumer) + partition key | **M** | Key extraction, Schema Registry, error handling |
+| **search-indexer-service** + idempotent ES bulk + DLQ | **L** | Backpressure, retries, version discipline, load tests |
+| **enrichment-worker** (synonyms, department tree, joins) | **L** | State, config reload, optional Flink later |
+| **Redis** query cache with safe multi-tenant keys | **M** | Key design, TTL policy, invalidation hooks |
+| **Spring Cloud Gateway** routes + auth integration | **M** | Depends on IdP and org standards |
+| Cold start **bulk** + alias flip (Spring Batch or Spark) | **L** | Consistent snapshot, validation, rollback story |
+| **Hadoop/lake** archive + Spark **reconciliation** job | **L** | Storage layout, IAM, scheduling, diff logic |
+| NL / recipe **ingredient expansion** + ranking tweaks | **L–XL** | Product + data science iteration, not just code |
+| **Multi-region** search + CDC fan-out | **XL** | CCR, routing, conflict rules, operational maturity |
+| End-to-end **Testcontainers** (PG + Kafka + Connect/Debezium + ES) | **M–L** | CI time, flake control, fixture maintenance |
+
+**Critical path for “search updates from inventory”:** outbox → Debezium → unwrap → indexer → ES (**M + M–L + M + L** in aggregate complexity, with parallelism possible between Connect setup and indexer development).
+
+---
+
+## 18. Document Control
 
 | Version | Date | Notes |
 |---------|------|--------|
 | 1.0 | 2025-03-27 | Initial architecture and plan. |
 | 1.1 | 2025-03-27 | Industry stacks, OSS/long-term, weaknesses, Hadoop when needed, CDC depth (sharding, alternatives), refresh depth, testing. |
+| 1.2 | 2025-03-27 | **Decision:** transactional outbox + **Debezium**; stack section for Connect; escape hatch §6.5; effort table §17. |
