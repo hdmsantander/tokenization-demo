@@ -1,6 +1,6 @@
 # Grocery Item Search — Architecture & Delivery Plan
 
-This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, **resolved platform defaults** (**§16**), **observability, mitigation, and monitoring** (**§18**), phased rollout, and **relative effort** for key features (**§17**). **Implementation is intentionally deferred** until stakeholders review and align on scope.
+This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, **resolved platform defaults** (**§16**), **observability, mitigation, and monitoring** (**§18**), **local demo scope (Docker & Docker Compose)** (**§19**), **optional Kubernetes** (**§20**), **cloud integration mappings (Azure, Google Cloud)** (**§21**), phased rollout, and **relative effort** for key features (**§17**). The architecture stays **cloud-agnostic**; cloud sections are **integration maps**, not lock-in. **Implementation is intentionally deferred** until stakeholders review and align on scope.
 
 ---
 
@@ -16,6 +16,8 @@ This document describes a **planned** software stack and data flows for a **natu
 | **Hadoop when the problem needs it** | Use **HDFS (or cloud object store with Hadoop-compatible APIs)** and **Spark/Flink** for **large-scale snapshotting, reconciliation, feature generation, and full rebuilds**—not as decoration, but wherever volume, audit, or ML pipelines exceed what streaming microservices alone should carry. |
 
 **Non-goals (initial phase):** Replacing the inventory OLTP database; building a general-purpose web crawler; full semantic/vector-only search (can be phase 2+).
+
+**Demo / repository scope:** The **reference implementation** when code lands is bounded to **Docker** images and a **Docker Compose** stack for local and CI demo (**§19**). **Kubernetes** and **managed cloud** services are **documented as next steps**, not required to run the demo.
 
 ---
 
@@ -510,12 +512,12 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 
 ## 15. Phased Delivery Plan (Post-Feedback)
 
-1. **Phase 0 — Foundations:** Parent POM, **search-query-service** skeleton, ES cluster (dev), sample index mapping, **Testcontainers** ES + Redis tests; baseline **§18** (OTel + scrape targets + SLO drafts).
+1. **Phase 0 — Foundations:** Parent POM, **search-query-service** skeleton, ES cluster (dev), sample index mapping, **Testcontainers** ES + Redis tests; **`docker-compose`** demo stack (**§19**) for manual E2E; baseline **§18** (OTel + scrape targets + SLO drafts).
 2. **Phase 1 — Outbox + Debezium:** Outbox schema and writes in **inventory-api-service**; **Kafka Connect + Debezium** connector; unwrap/SMT or relay; **`search.item.enriched`** + **indexer** + DLQ; **dashboards and alerts** for pipeline lag, Connect health, and ES indexing (§18.3).
 3. **Phase 1b — Lake (when catalog or audit needs it):** Archive topic to **HDFS/S3**; document **replay** procedure.
 4. **Phase 2 — NL quality:** Synonyms, department hierarchy, autocomplete; Redis caching with safe keys.
 5. **Phase 3 — Recipe / ingredients + batch features:** Spark jobs from lake for enrichment signals.
-6. **Phase 4 — Scale & resilience:** HPA tuning, multi-AZ, chaos testing, reconciliation jobs, runbooks.
+6. **Phase 4 — Scale & resilience:** **Kubernetes** rollout (**§20**) where applicable; HPA tuning, multi-AZ, chaos testing, reconciliation jobs, runbooks.
 
 ---
 
@@ -531,7 +533,7 @@ Former “open questions” are resolved here with **defaults** that match commo
 | **Catalog scale** | Design for **10⁷–10⁹** doc IDs (SKU×store×tenant) with **horizontal scaling** | Retail search indices are shard- and partition-bound; size drives **partition count** and **ES data nodes**, not pattern choice | Capacity review when **single-tenant** doc count exceeds planned **shard** budget. |
 | **Freshness SLO** | Target **p99 end-to-end visibility ≤ 5s** under normal load; **p99.9** may be **≤ 15s** during catch-up | Matches common “near-real-time search” expectations; **ES `refresh_interval`** (often 1s) dominates tail | Stricter SLA → `refresh=wait_for` for selective writes, **dedicated** indexing tier, or **accept higher ES cost**. |
 | **Multi-tenant** | **Shared** Elasticsearch cluster + **mandatory `tenant_id` filter** on every query + **`tenant_id` in document_id** prefix | Industry default for SaaS catalog search; cost-efficient | **Dedicated cluster per retailer** when contract, noisy neighbor, or compliance requires isolation. |
-| **Kafka / ES / Connect hosting** | **Managed-first:** MSK / Confluent / Aiven + Elastic Cloud or OpenSearch managed + **MSK Connect** or Confluent with **Debezium plugin** | Reduces on-call for broker/Connect HA; team focuses on **schemas and consumers** | Self-managed only for **regulatory**, **egress**, or **unit economics** after explicit TCO review. |
+| **Kafka / ES / Connect hosting** | **Managed-first** (any cloud or Confluent Cloud) + **§21** maps for **Azure** / **Google Cloud** | Reduces on-call for broker/Connect HA; team focuses on **schemas and consumers** | Self-managed on **Kubernetes** (**§20**) or VMs for **regulatory**, **egress**, or **unit economics** after explicit TCO review. |
 | **Vendor CDC mandate** | Keep **outbox + topic contracts**; replace capture with §6.5 path | Avoids rewriting **Spring consumers** | DBA/platform team delivers **Kafka mirror** with same **keying** and **payload** after unwrap. |
 | **Lake (Hadoop/S3) timing** | **Phase 1b** default: rely on **Kafka retention** + replay for weeks-scale recovery; **add lake** when audit, **multi-year** retention, or **Spark** reconciliation/ML is required | Industry pattern: stream for real time, **object store** for cheap history | Regulated audit from day one → **Phase 1** mirror `search.*` topics to **S3/HDFS**. |
 
@@ -560,6 +562,7 @@ Effort is expressed as **T-shirt size** for a **mature team** already familiar w
 |----------------------|------|----------------|
 | Parent POM, conventions, shared **Avro** modules | **S** | Build, CI, `shared-contracts` |
 | **search-query-service** skeleton + ES mapping + health | **M** | Boot app, ES client, Docker/Testcontainers smoke |
+| **`docker-compose.yml`** demo (PG, Kafka, Connect+Debezium, ES, Redis, services) | **S–M** | Not production-HA; documented limits (**§19**) |
 | **Transactional outbox** table + write path in inventory API | **M** | DB migration, TX boundary, event builders, payload caps |
 | **Debezium** connector + Connect HA + PostgreSQL **logical replication** | **M–L** | Slots, monitoring, playbook for connector pause/failover |
 | Unwrap pipeline (**SMT** or small **relay** consumer) + partition key | **M** | Key extraction, Schema Registry, error handling |
@@ -632,7 +635,7 @@ flowchart LR
 | **Search-native UI** | **Kibana** (or OpenSearch Dashboards): slow logs, index health, thread pools | Complements Grafana for ES internals |
 | **Alerting** | **Alertmanager**, Grafana Alerting, or cloud equivalent | Routes to on-call; **runbooks** link from alert annotations |
 
-**Managed equivalent:** AWS **AMP + AMG + X-Ray**, GCP **Cloud Monitoring + Trace**, Datadog/New Relic **with OTel ingest**—same **instrumentation** in application code.
+**Managed equivalent:** AWS **AMP + AMG + X-Ray**, **Azure Monitor + Application Insights**, **Google Cloud Observability** (Cloud Monitoring + Cloud Trace), Datadog/New Relic **with OTel ingest**—same **instrumentation** in application code. See **§21** for Azure/GCP service names.
 
 ### 18.2 Mitigation catalog (risk → action → owner)
 
@@ -678,7 +681,110 @@ Tune numeric thresholds after baseline load tests; **error budget** policy (when
 
 ---
 
-## 19. Document Control
+## 19. Local demo scope: Docker and Docker Compose
+
+The **project demo** and **early integration scope** are intentionally limited to **containers** orchestrated with **Docker Compose**. This keeps onboarding and CI reproducible without a cluster credential.
+
+### 19.1 What the Compose stack should include
+
+| Service | Image / pattern | Role in demo |
+|---------|-----------------|--------------|
+| **PostgreSQL** | Official `postgres` (version pinned) | OLTP + **transactional outbox**; `wal_level=logical` for Debezium |
+| **Apache Kafka** | Bitnami or Confluent **Kafka** (KRaft mode preferred to drop ZooKeeper) | Event bus |
+| **Kafka Connect + Debezium** | Debezium Connect image or Connect worker + Debezium plugin | Captures outbox table → Kafka topic |
+| **Elasticsearch** | Elastic Docker image (license terms apply) or **OpenSearch** | Search index |
+| **Redis** | Official `redis` | Optional query cache in demo |
+| **Spring services** | **Built from Dockerfile** (multi-stage Maven → JRE 21) | `inventory-api-service`, `search-query-service`, `search-indexer-service`, `enrichment-worker`, optional **Spring Cloud Gateway** |
+| **Observability (optional in demo)** | **OTel Collector**, **Prometheus**, **Grafana** | Mirrors §18 locally |
+
+### 19.2 Compose boundaries (explicit)
+
+- **Single-host**, **no HA**: acceptable broker/Connect restarts; not a production SLA.
+- **Resource pins:** JVM `-Xmx`, ES `ES_JAVA_OPTS`, Kafka heap—document **minimum laptop specs** in `compose/README` when implemented.
+- **Secrets:** `.env` / Docker secrets for demo only; **Kubernetes/cloud** use **External Secrets** or vault integration (**§20**, **§21**).
+- **Networking:** fixed service DNS names (`kafka:9092`, `postgres:5432`, etc.) match **Spring** `application-docker.yml` profiles.
+
+### 19.3 CI alignment
+
+- **Testcontainers** remain the **default** for automated tests (faster, isolated).
+- Optional **compose-based** smoke job (CI nightly or manual) validates **wiring** (Debezium connector registered, topics created).
+
+---
+
+## 20. Kubernetes (proposed production path)
+
+Kubernetes is **not** required for the **Compose demo** but is the **expected** runtime when scaling Spring services, running **Strimzi** (or equivalent) for Kafka, or using **operators** for Elasticsearch. Any CNCF-compliant distribution applies (**AKS**, **GKE**, **EKS**, on-prem).
+
+### 20.1 High-level K8s layout
+
+| Workload | Pattern | Notes |
+|----------|---------|--------|
+| **Spring Boot services** | `Deployment` + `Service` + **HPA** (CPU/RPS/custom **Kafka lag** metric) | **Liveness/readiness** probes on actuator; **PodDisruptionBudget** |
+| **Spring Cloud Gateway** | `Deployment` + `Service` + **Ingress** or **Gateway API** | TLS at ingress; **WAF** at cloud edge (**§21**) |
+| **PostgreSQL** | **Managed** (recommended) **or** **CloudNativePG** / **Crunchy** operator | Debezium needs **logical replication**—confirm cloud PG SKU (**§21**) |
+| **Kafka** | **Strimzi** `Kafka` CR **or** **managed** Kafka (see §21) | Connect runs as `KafkaConnect` CR or separate Connect deployment |
+| **Kafka Connect / Debezium** | Strimzi `KafkaConnect` + connector CR **or** `Deployment` with Debezium plugin | **JMX** or **Prometheus** annotations for scraping (**§18**) |
+| **Elasticsearch / OpenSearch** | **ECK** (Elastic) **or** OpenSearch Kubernetes operator **or** managed | Same index/alias strategy as §7 |
+| **Redis** | **Elasticache/Memorystore** via **Service** abstraction **or** Redis operator | Cache keys unchanged |
+| **Observability** | **OTel Collector** `DaemonSet` or sidecar; **Prometheus** (kube-prometheus-stack) | Same OTLP endpoints as local |
+
+### 20.2 Configuration and delivery
+
+- **Helm** or **Kustomize** per environment (`dev`/`staging`/`prod`); image tags from CI.
+- **ConfigMaps** for non-secret tuning; **Secrets** for DB/Kafka/ES credentials (sync from **Azure Key Vault** / **GCP Secret Manager** via operators—**§21**).
+- **NetworkPolicy** default-deny + allow ingress from gateway → query service, indexer → ES, consumers → Kafka.
+
+### 20.3 When to adopt K8s before “millions of users”
+
+Adopt when you need **independent scaling** of indexers, **rolling deploys** without Compose downtime, **multi-AZ**, or **managed add-ons** (ingress, certificates). Until then, **Compose + managed** data stores can suffice for **staging**.
+
+---
+
+## 21. Cloud integration: Microsoft Azure and Google Cloud
+
+The stack remains **portable**: same Spring images, **OTel** exporters, and **Kafka topic contracts**. The tables below map **logical components** to **Azure** and **Google Cloud** offerings. **Validate** replication (for Debezium), quotas, and licensing with your cloud account before commitment.
+
+### 21.1 Microsoft Azure mapping
+
+| Logical component | Azure service (typical) | Integration notes |
+|-------------------|-------------------------|-------------------|
+| **PostgreSQL + outbox** | **Azure Database for PostgreSQL – Flexible Server** | Enable extensions and **logical replication** as required for Debezium; size for **replication slot** WAL retention. |
+| **Kafka** | **Azure Event Hubs** (**Kafka protocol** surface) **or** **Confluent Cloud** on Azure **or** Kafka on **AKS** (Strimzi) | Event Hubs: verify **Kafka API** feature set vs client/Connect needs; **throughput units** sizing. |
+| **Kafka Connect / Debezium** | **AKS** `Deployment` / Strimzi `KafkaConnect` **or** self-managed Connect VMs | Connect must reach **PostgreSQL** (VNet/private link). |
+| **Elasticsearch / OpenSearch** | **Elastic Cloud** (Azure region) **or** marketplace Elastic **or** **Azure OpenSearch** (if applicable to org policy) | Same HTTP client configuration; TLS and auth via secrets. |
+| **Redis** | **Azure Cache for Redis** | TLS; connection string in **Key Vault**. |
+| **Object lake / archive** | **Azure Blob Storage** (Hadoop-compatible **abfs://** via configs) | Kafka **MirrorMaker** or **Flink** sink to archive topics (**§11**). |
+| **Batch / Spark** | **Azure Synapse**, **HDInsight**, **Databricks** | Reconciliation and bulk rebuild jobs. |
+| **Container runtime** | **Azure Kubernetes Service (AKS)** **or** **Azure Container Apps** | AKS aligns with §20 operators; Container Apps for **stateless** Spring + external managed data. |
+| **Observability** | **Azure Monitor**, **Application Insights**, **OTel** export to Azure monitor endpoint | Map §18 SLOs to **Alert rules** and **workbooks**. |
+| **Secrets / identity** | **Azure Key Vault** + **Workload Identity** / **Managed Identity** | No long-lived DB passwords in images. |
+| **Ingress / edge** | **Application Gateway** + **WAF**, **Front Door** | Rate limits, TLS termination. |
+
+### 21.2 Google Cloud mapping
+
+| Logical component | Google Cloud service (typical) | Integration notes |
+|-------------------|-------------------------------|-------------------|
+| **PostgreSQL + outbox** | **Cloud SQL for PostgreSQL** | Enable **logical decoding** / replication for Debezium per Cloud SQL docs; use **Private IP** connectivity. |
+| **Kafka** | **Google Cloud Managed Service for Apache Kafka** (where available) **or** **Confluent Cloud** on GCP **or** Strimzi on **GKE** | Confirm regional availability and **Kafka Connect** compatibility. |
+| **Kafka Connect / Debezium** | **GKE** `Deployment` / Strimzi **or** Connect on GCE/VM | VPC access to **Cloud SQL** (Auth proxy or private). |
+| **Elasticsearch / OpenSearch** | **Elastic Cloud** (GCP region) **or** **Elastic** on GCP Marketplace **or** managed OpenSearch partner | Same as portable stack. |
+| **Redis** | **Memorystore for Redis** | VPC; TLS options per tier. |
+| **Object lake / archive** | **Cloud Storage** (GCS); **Hadoop-compatible** `gs://` for Spark | Archive and reconciliation inputs. |
+| **Batch / Spark** | **Dataproc**, **BigQuery** (+ **Dataflow** for streaming bridges if needed) | Heavy diff/reconciliation (**§11**). |
+| **Container runtime** | **Google Kubernetes Engine (GKE)** **or** **Cloud Run** (stateless services only) | GKE for Kafka/Connect/operators; **Cloud Run** possible for **query** service if Kafka/ES are reachable privately. |
+| **Observability** | **Cloud Monitoring**, **Cloud Trace**, **Cloud Logging**; **OTel** export | Align §18 dashboards with **SLO** alerting. |
+| **Secrets / identity** | **Secret Manager** + **Workload Identity** | GKE pods access secrets without static keys. |
+| **Ingress / edge** | **Cloud Load Balancing**, **Cloud Armor** | WAF/rate limiting at edge. |
+
+### 21.3 Cross-cloud principles
+
+- Prefer **private connectivity** (VPC peering, Private Link, Private Service Connect) between **Connect → PostgreSQL** and **consumers → Kafka**.
+- Keep **topic names**, **Avro schemas**, and **OTel resource attributes** (`service.name`, `deployment.environment`) **identical** across Azure/GCP/on-prem so **runbooks** stay portable.
+- **Multi-cloud** is supported by **portable images + Kafka + ES**; avoid proprietary **only** message bus features unless abstracted.
+
+---
+
+## 22. Document Control
 
 | Version | Date | Notes |
 |---------|------|--------|
@@ -686,3 +792,4 @@ Tune numeric thresholds after baseline load tests; **error budget** policy (when
 | 1.1 | 2025-03-27 | Industry stacks, OSS/long-term, weaknesses, Hadoop when needed, CDC depth (sharding, alternatives), refresh depth, testing. |
 | 1.2 | 2025-03-27 | **Decision:** transactional outbox + **Debezium**; stack section for Connect; escape hatch §6.5; effort table §17. |
 | 1.3 | 2025-03-27 | Resolved former open questions (§16); **observability stack** §18; mitigation + monitoring checklist; doc renumber. |
+| 1.4 | 2025-03-27 | **§19** Docker Compose demo scope; **§20** Kubernetes proposal; **§21** Azure + GCP mapping; cloud-agnostic framing. |
