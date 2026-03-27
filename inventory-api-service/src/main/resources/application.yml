@@ -1,6 +1,9 @@
 spring:
   application:
     name: inventory-api-service
+  config:
+    import: classpath:config/grocery-defaults.yml
+  # Stage C: add spring-boot-starter-data-jpa + Flyway; then uncomment datasource using grocery.postgres.*
 
 server:
   port: 8080

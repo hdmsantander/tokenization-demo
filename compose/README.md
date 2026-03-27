@@ -1,6 +1,6 @@
 # Local infrastructure (Compose)
 
-Part of the **first-draft ecosystem**; see [**docs/IMPLEMENTATION.md**](../docs/IMPLEMENTATION.md) for **current vs next** implementation steps and how D0 fits the delivery flow.
+Part of the **first-draft ecosystem**; see [**docs/IMPLEMENTATION.md**](../docs/IMPLEMENTATION.md) for **current vs next** implementation steps and [**docs/CONFIGURATION.md**](../docs/CONFIGURATION.md) for **profiles** (`localhost` vs `docker` hostnames) and env overrides.
 
 ## `docker-compose.infra.yml` (D0)
 

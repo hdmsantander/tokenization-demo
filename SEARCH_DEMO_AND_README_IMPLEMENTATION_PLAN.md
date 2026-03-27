@@ -8,6 +8,7 @@ This document plans **staged, incremental work** to deliver the **local search d
 |----------|------|
 | [README.md](./README.md) | Entry point; status, summaries, links |
 | [docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md) | **Current vs next step**, delivery flow, first-draft ecosystem inventory |
+| [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) | **`shared-config`**, `grocery.*`, profiles, env overrides, pitfalls |
 | [SEARCH FEATURE.md](./SEARCH%20FEATURE.md) | Full architecture; **§15** phases, **§17** relative effort (T-shirt), **§19** Compose scope |
 
 ---
@@ -17,7 +18,7 @@ This document plans **staged, incremental work** to deliver the **local search d
 | Aspect | State |
 |--------|--------|
 | **You are here** | **End of Stage A (foundations)** → **next: Stage B (read path)** — see **[docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md)** |
-| Implementation | **First draft ecosystem:** Maven multi-module skeleton, JSON Schema contracts + tests, three Boot services (health + meta), Testcontainers ES/PG, **D0** Compose, scripts, CI |
+| Implementation | **First draft ecosystem:** Maven multi-module skeleton, **`shared-config`** (`grocery.*` YAML), JSON Schema contracts + tests, three Boot services (health + meta), Testcontainers ES/PG, **D0** Compose, scripts, CI |
 | Stage A detail | **A.1–A.3, A.5, A.6** done; **A.4** skeleton only (Kafka listener stub deferred to B-prep or **C.5** — see **IMPLEMENTATION.md §1**) |
 | Stage D detail | **D0** (`compose/docker-compose.infra.yml`) done; **D1** (Kafka + Connect + apps) not started |
 | Authoritative demo spec | **SEARCH FEATURE.md §19.1–§19.3** |
@@ -286,3 +287,4 @@ Present this as the **default execution order** for autonomous implementation (a
 | 1.1 | 2025-03-27 | Layer validation + Compose D0; frozen demo v1 decisions (**§3**); person-day + calendar **illustrative** estimates (**§7**); pre-implementation checklist + agent backlog (**§9–§10**). |
 | 1.2 | 2025-03-27 | **Execution started:** Maven multi-module skeleton (`shared-contracts`, three Boot services), JSON Schema contracts + tests, Testcontainers ES/PG smoke, `compose/docker-compose.infra.yml`, `scripts/onboard.sh` + `validate-infra.sh`, Maven Wrapper, GitHub Actions `mvn verify`. |
 | 1.3 | 2025-03-27 | **Flow update:** section **1** current state + ASCII flow; **D0** and backlog rows 1–4,6 marked **done**; **A.4** partial note; checklist **§9** rows 4–6 done; row 7 reframed; **[docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md)** added as operational guide. |
+| 1.4 | 2025-03-27 | **`shared-config`** module + **[docs/CONFIGURATION.md](./docs/CONFIGURATION.md)**; centralized `grocery-defaults.yml`; `docker` profile vs localhost; disable Spring Docker Compose auto-config; config binding tests in `search-query-service`. |

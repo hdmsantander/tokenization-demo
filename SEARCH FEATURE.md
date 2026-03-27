@@ -840,3 +840,4 @@ The stack remains **portable**: same Spring images, **OTel** exporters, and **Ka
 | 1.4 | 2025-03-27 | **§19** Docker Compose demo scope; **§20** Kubernetes proposal; **§21** Azure + GCP mapping; cloud-agnostic framing. |
 | 1.5 | 2025-03-27 | **§3.4–§3.5** comparable systems, quality attributes, anti-patterns / validation; **§14** and **§15** extensions; external references. |
 | 1.6 | 2025-03-27 | **Repository alignment:** first-draft **code** ecosystem (Maven modules, Compose D0, contracts, CI) lives alongside this spec; operational **current step** and flow: **`docs/IMPLEMENTATION.md`**. Architecture intent unchanged. |
+| 1.7 | 2025-03-27 | **Configuration:** repo uses **`shared-config`** + **`docs/CONFIGURATION.md`** for centralized `grocery.*` integration settings (hosts, topics); complements topic names in **§8**. |

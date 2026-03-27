@@ -10,6 +10,7 @@ This document is the **operational counterpart** to [SEARCH FEATURE.md](../SEARC
 |-------|--------|
 | **Stage** | **End of Stage A (foundations)** — **next work is Stage B** |
 | **Layer** | **Layer 1 complete** for day-to-day dev; **Layer 2 (read path) not started** |
+| **Configuration** | [CONFIGURATION.md](./CONFIGURATION.md) — **`shared-config`**, `grocery.*`, profiles, pitfalls |
 | **Plan reference** | [SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md](../SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) — **section 4 (Stage B)**, **section 8 (Milestone M1)** |
 | **Backlog** | Same document **section 10** — next rows: **5 (B.1–B.3)** after optional tidy-up of **A.4** (Kafka listener stub — see **section 4** below) |
 
@@ -65,9 +66,9 @@ flowchart LR
 
 | Component | In repo now | Planned (architecture) |
 |-----------|-------------|-------------------------|
-| **inventory-api-service** | HTTP + actuator on **:8080** | JPA + Flyway + transactional outbox (SEARCH FEATURE.md **section 6**) |
-| **search-query-service** | HTTP + actuator on **:8081** | Elasticsearch query API (SEARCH FEATURE.md **section 4**) |
-| **search-indexer-service** | HTTP + actuator on **:8082** | Kafka consumer → bulk index + DLQ (SEARCH FEATURE.md **section 7.2**) |
+| **inventory-api-service** | HTTP + actuator on **:8080** | JPA + Flyway + transactional outbox (SEARCH FEATURE.md **section 6**); imports **`shared-config`** (`grocery.postgres.*` ready for Stage C) |
+| **search-query-service** | HTTP + actuator on **:8081** | Elasticsearch query API (SEARCH FEATURE.md **section 4**); imports **`shared-config`** |
+| **search-indexer-service** | HTTP + actuator on **:8082** | Kafka consumer → bulk index + DLQ (SEARCH FEATURE.md **section 7.2**); imports **`shared-config`** |
 | **PostgreSQL** | Compose D0 + Testcontainers | Same; Debezium source |
 | **Elasticsearch** | Compose D0 + Testcontainers | Search index |
 | **Redis** | Compose D0 | Optional query cache (SEARCH FEATURE.md **section 9**) |
@@ -93,7 +94,7 @@ Topic names and Debezium connector JSON will be added with **Stage C / D1**; kee
 | search-query-service | 8081 | `application-docker.yml` → `elasticsearch:9200` |
 | search-indexer-service | 8082 | `application-docker.yml` → `kafka:9092`, `elasticsearch:9200` |
 
-Use `-Dspring-boot.run.profiles=docker` when running against Compose D0 (Kafka will fail for indexer until D1 — run indexer on default profile until then, or add `kafka` only in D1).
+Use `-Dspring-boot.run.profiles=docker` when the JVM runs **inside** the Compose network. On the **host** with published ports, use the **default** profile (`localhost` from **`shared-config`**). See [CONFIGURATION.md](./CONFIGURATION.md). Indexer Kafka bootstrap points at `localhost:9092` until Stage D1 adds Kafka to Compose.
 
 ---
 
@@ -125,6 +126,7 @@ docker compose -f compose/docker-compose.infra.yml up -d
 | Document | Use when you need |
 |----------|-------------------|
 | [README.md](../README.md) | Onboarding, quickstart, repo layout |
+| [CONFIGURATION.md](./CONFIGURATION.md) | Central config module, profiles, env vars |
 | **This file** | **Current step**, next steps, ecosystem inventory |
 | [SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md](../SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) | Stages A–E, effort (pd), checklist section 9, backlog section 10 |
 | [SEARCH FEATURE.md](../SEARCH%20FEATURE.md) | Full architecture, CDC depth, observability, cloud maps |
@@ -137,3 +139,4 @@ docker compose -f compose/docker-compose.infra.yml up -d
 | Version | Date | Summary |
 |---------|------|---------|
 | 1.0 | 2025-03-27 | First draft: flow, current step (post-A / pre-B), ecosystem table, next steps. |
+| 1.1 | 2025-03-27 | **`shared-config`** note; link **CONFIGURATION.md**; host vs `docker` profile clarification. |

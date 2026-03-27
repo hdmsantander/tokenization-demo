@@ -35,7 +35,7 @@ docker compose -f compose/docker-compose.infra.yml up -d
 
 Details: [**compose/README.md**](./compose/README.md).
 
-Run Spring services against Docker hosts using profile **`docker`** (see each module’s `application-docker.yml`). Example:
+Run Spring on the **host** with Compose ports published: use the **default** profile (`localhost` in **`shared-config`**). Run the app **inside** the same Compose network: activate profile **`docker`** (Compose service DNS). See [**docs/CONFIGURATION.md**](./docs/CONFIGURATION.md).
 
 ```bash
 ./mvnw -pl search-query-service spring-boot:run -Dspring-boot.run.profiles=docker
@@ -99,6 +99,7 @@ Industry-standard **OpenTelemetry** instrumentation in Spring Boot 3 (**Micromet
 | Document | Purpose |
 |----------|---------|
 | [**docs/IMPLEMENTATION.md**](./docs/IMPLEMENTATION.md) | **You are here:** current step (post-A / pre-B), next steps, first-draft ecosystem vs architecture, ports, validation |
+| [**docs/CONFIGURATION.md**](./docs/CONFIGURATION.md) | Central **`shared-config`**, `grocery.*` defaults, profiles (`docker`), env overrides, pitfalls avoided |
 | [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) | Validated layers, demo v1 decisions, person-day estimates, checklist, backlog with **done / next** markers |
 | [**SEARCH FEATURE.md**](./SEARCH%20FEATURE.md) | Full architecture: industry alignment, defaults, observability, Docker/K8s/cloud, CDC, refresh, topics |
 
@@ -127,6 +128,7 @@ Integration tests with **Testcontainers** (PostgreSQL, Kafka, Elasticsearch; **D
 | Path | Purpose |
 |------|---------|
 | `shared-contracts/` | JSON Schemas + fixture-based contract tests |
+| `shared-config/` | Central `grocery-defaults.yml` (imported by all services) |
 | `inventory-api-service/` | Port **8080** — inventory API (outbox in Stage C) |
 | `search-query-service/` | Port **8081** — search API (Elasticsearch in Stage B) |
 | `search-indexer-service/` | Port **8082** — Kafka → ES indexer (Stage C) |

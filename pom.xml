@@ -20,6 +20,7 @@
 
   <modules>
     <module>shared-contracts</module>
+    <module>shared-config</module>
     <module>search-query-service</module>
     <module>search-indexer-service</module>
     <module>inventory-api-service</module>
@@ -36,6 +37,11 @@
       <dependency>
         <groupId>com.grocery.search</groupId>
         <artifactId>shared-contracts</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.grocery.search</groupId>
+        <artifactId>shared-config</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

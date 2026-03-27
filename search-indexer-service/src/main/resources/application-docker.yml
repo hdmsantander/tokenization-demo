@@ -1,5 +1,0 @@
-spring:
-  kafka:
-    bootstrap-servers: kafka:9092
-  elasticsearch:
-    uris: http://elasticsearch:9200
