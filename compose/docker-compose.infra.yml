@@ -1,0 +1,52 @@
+# D0 infra — read-path and OLTP prep (SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md).
+# Not for Kafka/Debezium (full stack comes in Stage D1).
+#
+# Usage: from repo root →  docker compose -f compose/docker-compose.infra.yml up -d
+# Shutdown:              docker compose -f compose/docker-compose.infra.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: grocery-postgres
+    environment:
+      POSTGRES_DB: inventory
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+    ports:
+      - "5432:5432"
+    command: >
+      postgres
+      -c wal_level=logical
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory -d inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    container_name: grocery-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: grocery-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

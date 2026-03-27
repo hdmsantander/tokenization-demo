@@ -1,0 +1,7 @@
+{
+  "document_id": "t1:s42:SKU-001",
+  "tenant_id": "t1",
+  "event_type": "ItemSearchDelete",
+  "event_version": 2,
+  "payload": {}
+}

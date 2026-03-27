@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grocery-search.local/schemas/outbox-payload-unwrapped.json",
+  "title": "OutboxPayloadUnwrapped",
+  "description": "Payload after unwrap from Debezium outbox row (demo v1, JSON on wire).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["event_type", "event_version", "aggregate_id"],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "enum": ["ItemSearchUpsert", "ItemSearchDelete"]
+    },
+    "event_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "aggregate_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Business key, often same as document_id"
+    },
+    "tenant_id": { "type": "string" },
+    "store_id": { "type": "string" },
+    "sku": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "department": { "type": "string" },
+    "active": { "type": "boolean" }
+  }
+}

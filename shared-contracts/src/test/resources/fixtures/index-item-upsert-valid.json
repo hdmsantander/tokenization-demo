@@ -1,0 +1,14 @@
+{
+  "document_id": "t1:s42:SKU-001",
+  "tenant_id": "t1",
+  "event_type": "ItemSearchUpsert",
+  "event_version": 1,
+  "payload": {
+    "sku": "SKU-001",
+    "store_id": "s42",
+    "name": "Organic oats",
+    "description": "Rolled oats 1kg",
+    "department": "Pantry",
+    "active": true
+  }
+}

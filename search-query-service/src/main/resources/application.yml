@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: search-query-service
+  config:
+    import: classpath:config/grocery-defaults.yml
+  # Future (Stage B): spring-data-elasticsearch reads grocery.elasticsearch.uris
+  elasticsearch:
+    uris: ${grocery.elasticsearch.uris}
+  data:
+    redis:
+      host: ${grocery.redis.host}
+      port: ${grocery.redis.port}
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true

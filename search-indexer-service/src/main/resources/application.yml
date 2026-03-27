@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: search-indexer-service
+  config:
+    import: classpath:config/grocery-defaults.yml
+  # Wired when spring-kafka / elasticsearch clients are added (Stage C)
+  kafka:
+    bootstrap-servers: ${grocery.kafka.bootstrap-servers}
+  elasticsearch:
+    uris: ${grocery.elasticsearch.uris}
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true

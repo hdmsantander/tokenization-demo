@@ -1,0 +1,52 @@
+# =============================================================================
+# Central integration defaults — imported by all services via spring.config.import
+# =============================================================================
+# See docs/CONFIGURATION.md for overrides, profiles, and pitfalls.
+#
+# Pitfall avoided: Spring Boot 3.1+ Docker Compose auto-configuration. We disable it
+# here so `docker` profile means "Compose *network* hostnames", not "run Compose for me".
+#
+# Host-run JVM (Compose publishes ports): defaults use localhost + standard ports.
+# Container-run JVM (app in same Compose stack): activate profile `docker` — see second document.
+
+spring:
+  docker:
+    compose:
+      enabled: false
+
+grocery:
+  kafka-topics:
+    outbox-events: ${GROCERY_KAFKA_TOPIC_OUTBOX:inventory.outbox.events}
+    item-enriched: ${GROCERY_KAFKA_TOPIC_ENRICHED:search.item.enriched}
+    indexer-dlq: ${GROCERY_KAFKA_TOPIC_DLQ:search.index.dlq}
+  postgres:
+    host: ${GROCERY_POSTGRES_HOST:localhost}
+    port: ${GROCERY_POSTGRES_PORT:5432}
+    database: ${GROCERY_POSTGRES_DB:inventory}
+    user: ${GROCERY_POSTGRES_USER:inventory}
+    password: ${GROCERY_POSTGRES_PASSWORD:inventory}
+  elasticsearch:
+    uris: ${GROCERY_ELASTICSEARCH_URIS:http://localhost:9200}
+  kafka:
+    bootstrap-servers: ${GROCERY_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  redis:
+    host: ${GROCERY_REDIS_HOST:localhost}
+    port: ${GROCERY_REDIS_PORT:6379}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+grocery:
+  postgres:
+    host: postgres
+    port: 5432
+  elasticsearch:
+    uris: http://elasticsearch:9200
+  kafka:
+    bootstrap-servers: kafka:9092
+  redis:
+    host: redis
+    port: 6379
