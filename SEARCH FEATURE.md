@@ -1,6 +1,6 @@
 # Grocery Item Search — Architecture & Delivery Plan
 
-This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, phased rollout, and **relative effort** for key features. **Implementation is intentionally deferred** until stakeholders review and align on scope.
+This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, **resolved platform defaults** (**§16**), **observability, mitigation, and monitoring** (**§18**), phased rollout, and **relative effort** for key features (**§17**). **Implementation is intentionally deferred** until stakeholders review and align on scope.
 
 ---
 
@@ -95,7 +95,7 @@ Retail, marketplace, and “catalog + search” systems commonly converge on a s
 | Pattern | Typical components | Why it appears repeatedly |
 |--------|----------------------|---------------------------|
 | **Event-driven search index** | OLTP → **log-based CDC** → **Kafka** → stream processors → **Elasticsearch/OpenSearch** | Decouples read models from transactions; tolerates bursty updates; replay for recovery. |
-| **Observability around search** | **Elasticsearch + Kibana** (or OpenSearch Dashboards), metrics, tracing | Search is latency-sensitive; operators need slow-query and shard visibility. |
+| **Observability around search** | **OpenTelemetry** + **Prometheus/Grafana** + **Elasticsearch/Kibana** (domain-specific) | Unified traces/metrics/logs for microservices **and** deep ES/Kafka/Connect introspection (see **§18**). |
 | **Data lake for scale and history** | **HDFS or object store** + **Spark/Flink** for snapshots, training data, reconciliation | Streaming alone is poor at **petabyte-scale history**, cheap retention, and **batch diff** across billions of rows. |
 | **API + gateway** | **Spring Cloud Gateway** / Envoy / cloud API gateways | Cross-cutting auth, rate limits, and routing in microservice estates. |
 
@@ -148,7 +148,7 @@ Each sellable item (or SKU-store combination, depending on tenancy) becomes a **
 2. **Tokenize / parse** (ES `query_string` or `multi_match` with `best_fields` / `cross_fields`; stricter `match_phrase` for exact phrases).
 3. **Filters** (department, store, in_stock) — always applied as **filter context** for caching and speed.
 4. **Boost** name over description; penalize stale or discontinued SKUs if business rules require.
-5. **Recipe-style queries:** Optional **ingredient dictionary** expansion: map detected ingredients to canonical IDs and add `should` clauses (or a precomputed “recipe compatibility” feature in batch — see §8).
+5. **Recipe-style queries:** Optional **ingredient dictionary** expansion: map detected ingredients to canonical IDs and add `should` clauses (or a precomputed “recipe compatibility” feature in batch — see **§11** Hadoop / lake).
 
 ### 4.3 Libraries (search & text)
 
@@ -476,7 +476,7 @@ enrichment-worker/
 shared-contracts/          # Avro/JSON schemas, DTOs
 ```
 
-**Parent POM highlights:** `spring-boot-starter-parent` 3.2+, `spring-cloud-dependencies`, `kafka-clients` / `spring-kafka`, `spring-data-elasticsearch` or `co.elastic.clients:elasticsearch-java`, `testcontainers`, optional `debezium-testing-testcontainers` for pipeline integration tests.
+**Parent POM highlights:** `spring-boot-starter-parent` 3.2+, `spring-cloud-dependencies`, `kafka-clients` / `spring-kafka`, `spring-data-elasticsearch` or `co.elastic.clients:elasticsearch-java`, **Micrometer Observation + OpenTelemetry** (`micrometer-tracing-bridge-otel`, OTLP exporter), `testcontainers`, optional `debezium-testing-testcontainers` for pipeline integration tests.
 
 **Current repo state:** Planning documents only until feedback; **no service modules are generated yet** in this iteration.
 
@@ -510,8 +510,8 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 
 ## 15. Phased Delivery Plan (Post-Feedback)
 
-1. **Phase 0 — Foundations:** Parent POM, **search-query-service** skeleton, ES cluster (dev), sample index mapping, **Testcontainers** ES + Redis tests.
-2. **Phase 1 — Outbox + Debezium:** Outbox schema and writes in **inventory-api-service**; **Kafka Connect + Debezium** connector; unwrap/SMT or relay; **`search.item.enriched`** + **indexer** + DLQ; measure **lag percentiles** and **slot lag**.
+1. **Phase 0 — Foundations:** Parent POM, **search-query-service** skeleton, ES cluster (dev), sample index mapping, **Testcontainers** ES + Redis tests; baseline **§18** (OTel + scrape targets + SLO drafts).
+2. **Phase 1 — Outbox + Debezium:** Outbox schema and writes in **inventory-api-service**; **Kafka Connect + Debezium** connector; unwrap/SMT or relay; **`search.item.enriched`** + **indexer** + DLQ; **dashboards and alerts** for pipeline lag, Connect health, and ES indexing (§18.3).
 3. **Phase 1b — Lake (when catalog or audit needs it):** Archive topic to **HDFS/S3**; document **replay** procedure.
 4. **Phase 2 — NL quality:** Synonyms, department hierarchy, autocomplete; Redis caching with safe keys.
 5. **Phase 3 — Recipe / ingredients + batch features:** Spark jobs from lake for enrichment signals.
@@ -519,14 +519,36 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 
 ---
 
-## 16. Open Questions for Stakeholders
+## 16. Resolved architecture decisions (industry alignment)
 
-- OLTP engine (PostgreSQL vs Oracle vs SQL Server) and **expected catalog size** (SKUs × stores).
-- **Freshness SLA** (e.g. “99% of updates visible within 5s”) vs cost.
-- **Single vs multi-tenant** search (per retailer vs platform).
-- **Managed vs self-hosted** Kafka, Elasticsearch, and **Kafka Connect** (self-managed Debezium vs Confluent Cloud / MSK Connect).
-- Whether any **mandated vendor CDC** requires the §6.5 **escape hatch** (topics and schemas unchanged).
-- **Retention and compliance** driving **Hadoop/lake** in phase 1 vs phase 1b.
+Former “open questions” are resolved here with **defaults** that match common **cloud-native / event-driven** practice (2024–2026). **Org-specific inputs** (exact SKU counts, regulatory zone, cloud contract) still refine capacity numbers but no longer block architectural direction.
+
+### 16.1 Data plane defaults
+
+| Topic | Default decision | Rationale (industry / practice) | When to deviate |
+|-------|------------------|--------------------------------|-----------------|
+| **OLTP** | **PostgreSQL** as reference platform for v1 | Mature **Debezium PostgreSQL** connector, logical decoding, operational playbooks; aligns with most greenfield microservice estates | **Oracle / SQL Server** already mandated → use same **outbox** table and §6.5 **escape hatch** CDC to **identical Kafka topics**; do not fork consumer code. |
+| **Catalog scale** | Design for **10⁷–10⁹** doc IDs (SKU×store×tenant) with **horizontal scaling** | Retail search indices are shard- and partition-bound; size drives **partition count** and **ES data nodes**, not pattern choice | Capacity review when **single-tenant** doc count exceeds planned **shard** budget. |
+| **Freshness SLO** | Target **p99 end-to-end visibility ≤ 5s** under normal load; **p99.9** may be **≤ 15s** during catch-up | Matches common “near-real-time search” expectations; **ES `refresh_interval`** (often 1s) dominates tail | Stricter SLA → `refresh=wait_for` for selective writes, **dedicated** indexing tier, or **accept higher ES cost**. |
+| **Multi-tenant** | **Shared** Elasticsearch cluster + **mandatory `tenant_id` filter** on every query + **`tenant_id` in document_id** prefix | Industry default for SaaS catalog search; cost-efficient | **Dedicated cluster per retailer** when contract, noisy neighbor, or compliance requires isolation. |
+| **Kafka / ES / Connect hosting** | **Managed-first:** MSK / Confluent / Aiven + Elastic Cloud or OpenSearch managed + **MSK Connect** or Confluent with **Debezium plugin** | Reduces on-call for broker/Connect HA; team focuses on **schemas and consumers** | Self-managed only for **regulatory**, **egress**, or **unit economics** after explicit TCO review. |
+| **Vendor CDC mandate** | Keep **outbox + topic contracts**; replace capture with §6.5 path | Avoids rewriting **Spring consumers** | DBA/platform team delivers **Kafka mirror** with same **keying** and **payload** after unwrap. |
+| **Lake (Hadoop/S3) timing** | **Phase 1b** default: rely on **Kafka retention** + replay for weeks-scale recovery; **add lake** when audit, **multi-year** retention, or **Spark** reconciliation/ML is required | Industry pattern: stream for real time, **object store** for cheap history | Regulated audit from day one → **Phase 1** mirror `search.*` topics to **S3/HDFS**. |
+
+### 16.2 Conflicts resolved
+
+| Conflict | Resolution |
+|----------|------------|
+| **Debezium vs enterprise CDC** | **Debezium default**; enterprise CDC is a **drop-in replacement at the broker edge** only. |
+| **Outbox vs raw table CDC** | **Outbox wins** for search ingress; raw table CDC only for **internal** analytics if needed, not for public search contract. |
+| **OpenSearch vs Elasticsearch** | Either is valid; **same** observability pattern (§18). Choose based on **license/support** policy; avoid mixing in one environment. |
+| **Observability: one vendor vs OSS** | **OpenTelemetry** as **vendor-neutral** instrumentation; backends can be **Grafana Cloud**, **Datadog**, **Elastic Observability**, or self-hosted **Prometheus + Tempo + Loki** (§18.1). |
+
+### 16.3 Remaining inputs (capacity only, not architecture)
+
+- Exact **peak writes/sec** to outbox and **query QPS** for sizing Kafka partitions and ES nodes.
+- **Data residency** per country for Kafka/ES/logs.
+- **IdP** for gateway (OAuth2/OIDC vendor) — does not change pipeline design.
 
 ---
 
@@ -550,15 +572,117 @@ Effort is expressed as **T-shirt size** for a **mature team** already familiar w
 | NL / recipe **ingredient expansion** + ranking tweaks | **L–XL** | Product + data science iteration, not just code |
 | **Multi-region** search + CDC fan-out | **XL** | CCR, routing, conflict rules, operational maturity |
 | End-to-end **Testcontainers** (PG + Kafka + Connect/Debezium + ES) | **M–L** | CI time, flake control, fixture maintenance |
+| **Observability baseline** (§18): OTel in all Spring services, scrape configs, core Grafana dashboards | **M** | PagerDuty/alert routing is org-specific |
 
 **Critical path for “search updates from inventory”:** outbox → Debezium → unwrap → indexer → ES (**M + M–L + M + L** in aggregate complexity, with parallelism possible between Connect setup and indexer development).
 
 ---
 
-## 18. Document Control
+## 18. Observability stack, mitigation, and monitoring
+
+This section aligns with **current industry practice**: **OpenTelemetry (OTel)** as the **CNCF**-standard telemetry API/SDK, **Micrometer Observation** in Spring Boot 3 for unified metrics/tracing, **Prometheus-style** metrics collection, and **Grafana** (or cloud equivalents) for dashboards—**alongside** Elasticsearch’s native **Kibana** views for search-specific diagnostics.
+
+### 18.1 Reference observability architecture
+
+```mermaid
+flowchart LR
+  subgraph Apps["Spring services + Gateway"]
+    OTelSDK[OTel SDK / Micrometer]
+  end
+  subgraph Infra["Data plane"]
+    KC[Kafka Connect / Debezium]
+    BR[Kafka brokers]
+    ESn[Elasticsearch nodes]
+    PG[(PostgreSQL)]
+  end
+  subgraph Collect["Collection & storage"]
+    COLL[OTel Collector]
+    PROM[Prometheus or Mimir / AMP]
+    TEMPO[Tempo / Jaeger / X-Ray]
+    LOKI[Loki / cloud logs]
+  end
+  subgraph Viz["Visualization & alerting"]
+    GRAF[Grafana]
+    KIB[Kibana]
+    ALT[Alertmanager / PagerDuty]
+  end
+
+  Apps --> COLL
+  COLL --> PROM
+  COLL --> TEMPO
+  Apps --> LOKI
+  KC --> PROM
+  BR --> PROM
+  ESn --> PROM
+  ESn --> KIB
+  PG --> PROM
+  PROM --> GRAF
+  TEMPO --> GRAF
+  LOKI --> GRAF
+  GRAF --> ALT
+```
+
+| Layer | Recommended components | Role |
+|-------|------------------------|------|
+| **Instrumentation** | **Spring Boot 3** + **Micrometer** + **micrometer-tracing-bridge-otel**; enable **Kafka** `observationEnabled` on **KafkaTemplate** and listener containers for **trace propagation** via headers | Single pattern for HTTP + Kafka + JDBC spans; **W3C tracecontext** |
+| **Export** | **OTLP** to **OpenTelemetry Collector** (sidecar or DaemonSet) | Vendor-neutral fan-out to metrics, traces, logs |
+| **Metrics** | **Prometheus** scrapes (apps, **Kafka Exporter**, **JMX Exporter** on Connect workers, **postgres_exporter**, **redis_exporter**, ES **Prometheus module** or Elastic Agent metrics) | SLO dashboards and alerting |
+| **Traces** | **Grafana Tempo**, **Jaeger**, or cloud **APM** | End-to-end **inventory → Kafka → indexer → ES** latency breakdown |
+| **Logs** | **Structured JSON** (trace_id/span_id injected) → **Loki**, **OpenSearch**, or cloud logging | Correlate with traces; **never** log PII payloads |
+| **Search-native UI** | **Kibana** (or OpenSearch Dashboards): slow logs, index health, thread pools | Complements Grafana for ES internals |
+| **Alerting** | **Alertmanager**, Grafana Alerting, or cloud equivalent | Routes to on-call; **runbooks** link from alert annotations |
+
+**Managed equivalent:** AWS **AMP + AMG + X-Ray**, GCP **Cloud Monitoring + Trace**, Datadog/New Relic **with OTel ingest**—same **instrumentation** in application code.
+
+### 18.2 Mitigation catalog (risk → action → owner)
+
+| Risk | Mitigation | Primary owner |
+|------|------------|----------------|
+| **Search results stale vs OLTP** | Idempotent indexer + **version** in payload; **reconciliation job** from lake (§11); feature flag to **pause** bad consumers | Search platform |
+| **Connector stops / slot bloat** | **HA Connect** cluster; **automated restart**; monitor **replication lag** and **slot** size; runbook to **drop/recreate** slot only with **full replay** plan | Data platform / DBA |
+| **Kafka lag explosion** | **Scale consumers** (HPA on lag metric); **throttle** upstream bulk; temporary **increase partitions** only with **rekey** plan | Streaming team |
+| **ES indexing overwhelms queries** | **Separate ingest-coordinating** nodes or **indexing window** tuning; **bulk** tuning; **circuit breaker** alerts | Search platform |
+| **Bad deploy corrupts mapping** | **Blue/green** index + **alias flip**; **DLQ** growth alert stops blast radius | Search platform |
+| **Outbox unbounded growth** | **Cleanup job** with **idempotency store**; **partition** outbox by month if needed; alert on **row count** and **table size** | Inventory service |
+| **Cache leak / wrong tenant data** | **Mandatory** `tenant_id` + store in cache key; **TTL** caps; **WAF** on query length | API / security |
+
+### 18.3 Monitoring checklist (what to alert on)
+
+| Component | Metric / signal | Why it matters | Example alert condition |
+|-----------|-----------------|----------------|-------------------------|
+| **PostgreSQL** | **Replication slot lag** (WAL retained for Debezium) | Disk fill / CDC stall | Lag **> N GB** or **> T minutes** |
+| **PostgreSQL** | **Outbox table row count / growth rate** | Unbounded outbox if cleanup fails | Growth **> threshold/hour** sustained |
+| **Debezium / Connect** | Connector **FAILED**, task failures | No events to search | State != RUNNING **> 1 min** |
+| **Debezium** | **MilliSecondsBehindSource** (or equivalent lag MBean) | End-to-end freshness | **p99 > freshness SLO** |
+| **Kafka** | **Consumer group lag** (`enrich`, `indexer`) | Stale index | Lag **> N messages** or **age > SLO** |
+| **Kafka** | **Under-replicated partitions**, **offline brokers** | Durability risk | Any **URP > 0** sustained |
+| **Spring consumers** | **Processing latency**, **error rate** by topic | Hotspots / bad payloads | Error rate **> X%** |
+| **Elasticsearch** | **Indexing rate**, **bulk rejections**, **thread pool rejections** | Pipeline backpressure | Rejections **> 0** sustained |
+| **Elasticsearch** | **Search latency** (p95/p99), **heap**, **GC** | User experience | p99 **> budget** |
+| **Elasticsearch** | **Cluster health RED**, **unassigned shards** | Outage | Health **RED** |
+| **Redis** | **evicted_keys**, **used_memory**, **latency** | Cache collapse | Evictions **> 0** if policy should be no-evict |
+| **API Gateway + query svc** | **HTTP 5xx**, **latency**, **saturation** | User-facing | SLO burn rate |
+
+**Synthetic checks:** Periodic **canary query** (known SKU) + **canary outbox event** in non-prod or shadow topic validates **end-to-end** without user traffic.
+
+### 18.4 SLOs and error budgets (starting point)
+
+| SLO | Target | Measurement |
+|-----|--------|-------------|
+| **Search API availability** | 99.9% monthly | Gateway **2xx** excluding client errors |
+| **Search query latency** | p95 **< 300 ms**, p99 **< 800 ms** (uncached) | Server-side span from gateway to ES |
+| **Index freshness** | **p99** pipeline **< 5s** from outbox commit to **search-visible** | Synthetic or tagged canary + **lag metrics** |
+| **Indexer correctness** | **Zero unbounded DLQ growth** | DLQ rate with **budget** for known bad vendor rows |
+
+Tune numeric thresholds after baseline load tests; **error budget** policy (when to freeze features vs fix reliability) is a **product + SRE** agreement.
+
+---
+
+## 19. Document Control
 
 | Version | Date | Notes |
 |---------|------|--------|
 | 1.0 | 2025-03-27 | Initial architecture and plan. |
 | 1.1 | 2025-03-27 | Industry stacks, OSS/long-term, weaknesses, Hadoop when needed, CDC depth (sharding, alternatives), refresh depth, testing. |
 | 1.2 | 2025-03-27 | **Decision:** transactional outbox + **Debezium**; stack section for Connect; escape hatch §6.5; effort table §17. |
+| 1.3 | 2025-03-27 | Resolved former open questions (§16); **observability stack** §18; mitigation + monitoring checklist; doc renumber. |
