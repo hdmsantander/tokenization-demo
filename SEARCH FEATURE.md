@@ -1,6 +1,6 @@
 # Grocery Item Search — Architecture & Delivery Plan
 
-This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, industry patterns, long-term risks, **resolved platform defaults** (**§16**), **observability, mitigation, and monitoring** (**§18**), **local demo scope (Docker & Docker Compose)** (**§19**), **optional Kubernetes** (**§20**), **cloud integration mappings (Azure, Google Cloud)** (**§21**), phased rollout, and **relative effort** for key features (**§17**). The architecture stays **cloud-agnostic**; cloud sections are **integration maps**, not lock-in. **Implementation is intentionally deferred** until stakeholders review and align on scope.
+This document describes a **planned** software stack and data flows for a **natural-language and recipe-oriented search** feature over retail grocery inventory (name, description, department, and related attributes). It is written from **lead architect** and **lead engineer** perspectives: goals, boundaries, services, **CDC in depth** (with a **decided** pattern: **transactional outbox + Debezium on Kafka Connect**), **index refresh in depth**, Hadoop-backed batch and reconciliation, latency expectations, libraries, **industry parallels, quality attributes, and anti-pattern validation** (**§3.4–§3.5**), long-term risks, **resolved platform defaults** (**§16**), **observability, mitigation, and monitoring** (**§18**), **local demo scope (Docker & Docker Compose)** (**§19**), **optional Kubernetes** (**§20**), **cloud integration mappings (Azure, Google Cloud)** (**§21**), phased rollout, and **relative effort** for key features (**§17**). The architecture stays **cloud-agnostic**; cloud sections are **integration maps**, not lock-in. **Implementation is intentionally deferred** until stakeholders review and align on scope.
 
 ---
 
@@ -126,6 +126,44 @@ This program **standardizes** on **PostgreSQL (or chosen OLTP) → transactional
 | **Exactly-once illusion** | Duplicate or out-of-order events | **Idempotent** writes; **monotonic version** per document; compaction only where understood. |
 | **Operational sprawl** | On-call fatigue (Kafka + Connect + ES + Hadoop) | Managed services where ROI clear; **golden paths** and runbooks; one “pipeline owner” team. |
 | **Multi-region** | Split-brain indexes, conflicting updates | Leader region for writes + **CCR**, or **global ID** + conflict rules; avoid naive dual-write. |
+
+### 3.4 Comparable systems and quality attributes (industry parallels)
+
+Public write-ups and vendor guidance on **catalog / product / inventory search** repeatedly converge on a shape very close to this proposal: **normalized OLTP** for writes, **denormalized search index** for reads (**CQRS**-style separation), **asynchronous synchronization** via **events or CDC**, and **Elasticsearch (or OpenSearch)** for full-text and faceting. Examples include **PostgreSQL → Debezium → Kafka → Spring → Elasticsearch** pipelines described in practitioner articles, **RDBMS + Elasticsearch** “best of both worlds” product search discussions (e.g. [ePages on CQRS with Elasticsearch](https://developer.epages.com/blog/tech-stories/harnessing-the-best-features-of-rdbms-and-elasticsearch-with-cqrs/)), and **real-time inventory** architectures combining **Postgres, Kafka, and Elasticsearch**. Those systems stress **eventual consistency** between OLTP and search, **idempotent** consumers, and **operational** focus on lag and index health—consistent with **§6**, **§7**, and **§18** here.
+
+**Quality attributes** the proposed stack is optimized for (and how they are achieved):
+
+| Attribute | Target behavior | Primary mechanisms |
+|-----------|-----------------|-------------------|
+| **Availability (read path)** | Search stays up when inventory API blips | Stateless **query service**, ES cluster redundancy, cache (§9), gateway timeouts |
+| **Latency (query)** | Low p95/p99 for NL + filters | ES tuning, **filter context**, Redis (§9), avoid `wait_for` on hot path (§7) |
+| **Freshness (index)** | Near-real-time after commit | Outbox + Debezium + indexer; **SLOs** in §18.4 |
+| **Consistency** | **Eventual** between OLTP and search; no false “strong” guarantee | **OLTP authoritative**; **version/seq** for last-write-wins; reconciliation (§7.4, §11) |
+| **Scalability** | Read-heavy, millions of users | Horizontal **query** pods, ES scale-out, Kafka partitions (§6.3, §13, §20) |
+| **Durability / recoverability** | Replay after mistakes | Kafka retention, optional **lake** (§11), DLQ + replay |
+| **Operability** | Debug pipeline and SLO burn | **§18** metrics/traces; Kibana for ES; runbooks |
+| **Security / tenancy** | No cross-tenant leakage | **`tenant_id`** on every query (§16); cache keys; field filtering |
+| **Cost tradeoff** | Predictable $ vs freshness | Managed services (§16, §21); refresh and bulk tuning (§7) |
+
+### 3.5 Anti-patterns, counter-designs, and stack validation
+
+Industry and community sources call out **failure modes** that this design **explicitly avoids** or **mitigates**. The table below is a **validation checklist** for design reviews.
+
+| Anti-pattern or counter-design | Failure mode | How this proposal addresses it |
+|--------------------------------|--------------|--------------------------------|
+| **Dual write** (update PostgreSQL and Elasticsearch in the same request) | One succeeds, one fails → **permanent drift**; every writer must remember both stores | **Single write** to OLTP + **outbox** in one transaction; ES is **derived** only ([dual-write problem](https://www.confluent.io/blog/dual-write-problem/) framing). |
+| **“Kafka first, then database”** | Still **two systems** without a common commit; failure order creates inconsistency | **Never** the primary path; outbox keeps **broker publish** after **durable DB commit** via CDC. |
+| **Application publishes to Kafka + writes DB** (separate operations) | Same as dual write across **DB and broker** | Replaced by **outbox row in the same TX** as business data. |
+| **Raw CDC of all internal tables** into search consumers | **Tight coupling** to schema; accidental **PII** exposure; break on refactors | **Outbox** defines a **stable integration contract**; only intended fields in payload. |
+| **Outbox without operational visibility** | Connector or relay stalled → **silent divergence** (“committed in DB, never indexed”) | **§18.3** alerts: Connect **FAILED**, **MilliSecondsBehindSource**, consumer **lag**, outbox **growth**, slot lag. |
+| **Outbox without per-aggregate ordering discipline** | Events applied **out of order** → wrong final state | **Monotonic `seq`** (or version) + Kafka key = **`document_id`** (§6.3, §6.8). |
+| **Treating Elasticsearch as system of record** | Loss of **ACID**, inventory corruption risk | **OLTP only** as source of truth; ES is a **read model**. |
+| **Oversized outbox payloads** | Table bloat, replication cost, replay pain | **Payload caps**; store **references**; enrich downstream if needed. |
+| **Ignoring reconciliation** | Bugs or partial failures leave **dangling** drift | **§7.4**, lake/Spark diff, periodic checks. |
+| **Synchronous “read your writes” via ES only** | ES refresh latency violates user expectation | Document **eventual consistency**; for rare hard requirements, **read from OLTP** or **routing** + stricter refresh (costly). |
+| **Compose / demo mistaken for production HA** | Data loss or split-brain under real failure | **§19** boundaries; production on **§20** + managed data planes. |
+
+**Review ritual:** Before major releases, walk the **§3.5** table and **§18.3** checklist; run a **game day** (pause Connect, spike lag, fail indexer pod) and verify alerts and runbooks.
 
 ---
 
@@ -507,6 +545,11 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 | **PCI/PII** | Do not index forbidden fields; **field-level security** in ES where needed. |
 | **Connector upgrades** | Pin versions; test **WAL slot** behavior on PostgreSQL upgrades. |
 | **Vendor lock-in on CDC** | Keep **downstream topic contract** stable; swap capture layer if needed. |
+| **Silent outbox / pipeline stall** | Search **lags** OLTP with no user-visible error | **§18.3** alerts; synthetic **canary** event; dashboard “time since last indexed doc”. |
+| **Per-aggregate event reordering** | Stale **UPSERT** overwrites newer state | **`seq`/version** monotonic per `document_id`; drop stale (§6.8). |
+| **Assuming “exactly-once” end-to-end** | Double processing after retries | **Idempotent** indexer; at-least-once Kafka semantics accepted. |
+| **PII in search payloads** | Compliance breach | **Field allow-list** in outbox builders; audit **enrichment**; ES **field-level security** if needed. |
+| **Managed Kafka API gaps** (e.g. some broker compatibility surfaces) | Connect / transactions / ACL mismatch | **Spike** in non-prod (§21); fallback **Strimzi** on Kubernetes. |
 
 ---
 
@@ -518,6 +561,7 @@ shared-contracts/          # Avro/JSON schemas, DTOs
 4. **Phase 2 — NL quality:** Synonyms, department hierarchy, autocomplete; Redis caching with safe keys.
 5. **Phase 3 — Recipe / ingredients + batch features:** Spark jobs from lake for enrichment signals.
 6. **Phase 4 — Scale & resilience:** **Kubernetes** rollout (**§20**) where applicable; HPA tuning, multi-AZ, chaos testing, reconciliation jobs, runbooks.
+7. **Ongoing:** Re-validate **§3.5** anti-patterns after major schema or connector changes; **game day** exercises per **§3.5** review ritual.
 
 ---
 
@@ -576,6 +620,7 @@ Effort is expressed as **T-shirt size** for a **mature team** already familiar w
 | **Multi-region** search + CDC fan-out | **XL** | CCR, routing, conflict rules, operational maturity |
 | End-to-end **Testcontainers** (PG + Kafka + Connect/Debezium + ES) | **M–L** | CI time, flake control, fixture maintenance |
 | **Observability baseline** (§18): OTel in all Spring services, scrape configs, core Grafana dashboards | **M** | PagerDuty/alert routing is org-specific |
+| **Design validation kit**: **§3.5** checklist in CI/docs, optional **game day** runbook | **S–M** | Proves alerts and replay, not feature code |
 
 **Critical path for “search updates from inventory”:** outbox → Debezium → unwrap → indexer → ES (**M + M–L + M + L** in aggregate complexity, with parallelism possible between Connect setup and indexer development).
 
@@ -793,3 +838,4 @@ The stack remains **portable**: same Spring images, **OTel** exporters, and **Ka
 | 1.2 | 2025-03-27 | **Decision:** transactional outbox + **Debezium**; stack section for Connect; escape hatch §6.5; effort table §17. |
 | 1.3 | 2025-03-27 | Resolved former open questions (§16); **observability stack** §18; mitigation + monitoring checklist; doc renumber. |
 | 1.4 | 2025-03-27 | **§19** Docker Compose demo scope; **§20** Kubernetes proposal; **§21** Azure + GCP mapping; cloud-agnostic framing. |
+| 1.5 | 2025-03-27 | **§3.4–§3.5** comparable systems, quality attributes, anti-patterns / validation; **§14** and **§15** extensions; external references. |

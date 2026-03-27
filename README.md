@@ -44,11 +44,13 @@ Industry-standard **OpenTelemetry** instrumentation in Spring Boot 3 (**Micromet
 
 | Document | Purpose |
 |----------|---------|
-| [**SEARCH FEATURE.md**](./SEARCH%20FEATURE.md) | Full design: **§16** defaults, **§17** effort, **§18** observability, **§19** Docker Compose demo, **§20** Kubernetes, **§21** Azure & GCP, CDC (§6), refresh, topics, Hadoop, testing |
+| [**SEARCH FEATURE.md**](./SEARCH%20FEATURE.md) | Full design: **§3.4–§3.5** industry parallels & anti-pattern validation, **§16** defaults, **§17** effort, **§18** observability, **§19** Docker Compose, **§20** Kubernetes, **§21** Azure & GCP, CDC (§6), refresh, topics, Hadoop, testing |
 
 ## Industry alignment (summary)
 
 Common **open-source** cores: **Kafka**, **Elasticsearch or OpenSearch**, **Debezium**, **transactional outbox**, **OpenTelemetry**, optional **object store + Spark/Flink** for lake-scale history. **Docker Compose** for demo; **Kubernetes** + managed services for scale.
+
+The design matches **CQRS-style** product/catalog systems (OLTP for writes, search index for reads) described in industry write-ups—**PostgreSQL → CDC/outbox → Kafka → Elasticsearch** is a well-documented pattern; see **SEARCH FEATURE.md §3.4** for **quality attributes** (freshness, eventual consistency, operability) and **§3.5** for **anti-patterns avoided** (dual write, silent pipeline stall, treating ES as source of truth).
 
 ## Planned stack (summary)
 
