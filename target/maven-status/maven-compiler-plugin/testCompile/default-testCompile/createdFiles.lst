@@ -1,6 +1,0 @@
-com/tokenization/demo/service/TokenizationServiceTest.class
-com/tokenization/demo/service/WhitespaceTokenizerTest.class
-com/tokenization/demo/service/StemTokenizerTest.class
-com/tokenization/demo/TokenizationDemoApplicationTests.class
-com/tokenization/demo/service/StopwordTokenizerTest.class
-com/tokenization/demo/service/NgramTokenizerTest.class
