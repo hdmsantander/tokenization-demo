@@ -268,3 +268,4 @@ Present this as the **default execution order** for autonomous implementation (a
 |---------|------|---------|
 | 1.0 | 2025-03-27 | Initial plan: layers, stages, scope, contradictions, T-shirt-only complexity. |
 | 1.1 | 2025-03-27 | Layer validation + Compose D0; frozen demo v1 decisions (**§3**); person-day + calendar **illustrative** estimates (**§7**); pre-implementation checklist + agent backlog (**§9–§10**). |
+| 1.2 | 2025-03-27 | **Execution started:** Maven multi-module skeleton (`shared-contracts`, three Boot services), JSON Schema contracts + tests, Testcontainers ES/PG smoke, `compose/docker-compose.infra.yml`, `scripts/onboard.sh` + `validate-infra.sh`, Maven Wrapper, GitHub Actions `mvn verify`. |

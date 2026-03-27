@@ -6,19 +6,42 @@ The design is **cloud-agnostic**. **Microsoft Azure** and **Google Cloud** integ
 
 ## Status
 
-**Design complete; implementation not started.** The architecture and demo scope are documented in **SEARCH FEATURE.md** (especially **§15**, **§19**). **Demo v1 defaults** (search engine choice, document IDs, JSON payloads, indexer-owned enrichment) are **frozen** in [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md §3**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md#3-demo-v1-decisions-frozen-for-development) so development can begin without reopening those choices.
+**Implementation started (skeleton).** Multi-module **Java 21** / **Spring Boot 3.4** apps, **JSON Schema** contracts, **Maven Wrapper**, **GitHub Actions CI**, and **Compose D0** (Postgres + Elasticsearch + Redis) are in place. Business features (Flyway, Kafka indexer, Debezium) follow [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md) **§10**.
 
-Stakeholders may still adjust **non-demo** scope (cloud vendor, production HA, observability backends); track overrides in a short ADR or PR description if they change **§3** defaults.
+Architecture and demo scope remain in **SEARCH FEATURE.md** (**§15**, **§19**). **Demo v1 defaults** are frozen in the plan (**§3**).
+
+## Quickstart
+
+```bash
+./scripts/onboard.sh
+```
+
+This runs **`./mvnw verify`** (falls back to `mvn` if the wrapper is unavailable), which includes contract tests and—when Docker is available—Testcontainers checks for Elasticsearch and PostgreSQL.
+
+## Local infrastructure (Docker)
+
+```bash
+docker compose -f compose/docker-compose.infra.yml up -d
+./scripts/validate-infra.sh
+```
+
+Details: [**compose/README.md**](./compose/README.md).
+
+Run Spring services against Docker hosts using profile **`docker`** (see each module’s `application-docker.yml`). Example:
+
+```bash
+./mvnw -pl search-query-service spring-boot:run -Dspring-boot.run.profiles=docker
+```
 
 ## Development
 
 | Step | Action |
 |------|--------|
-| 1 | Read **§9** (pre-implementation checklist) in [**SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md**](./SEARCH_DEMO_AND_README_IMPLEMENTATION_PLAN.md). |
-| 2 | Run the **implementation backlog (§10)** in order after the checklist is satisfied. |
-| 3 | Target **~26–49 person-days** for the full demo vertical slice (see plan **§7**); Stage **C** (ingest + Debezium + indexer) is the largest block. |
+| 1 | Complete pre-implementation items in plan **§9** where still relevant (e.g. Elastic license check for your org). |
+| 2 | Follow implementation backlog **§10**; current repo state completes **A.1–A.6** (skeleton + tests) and **D0** (infra Compose). |
+| 3 | Target **~26–49 person-days** for the full demo vertical slice (plan **§7**). |
 
-**Local prerequisites (expected):** Docker with Compose, **≥ 16 GB RAM** recommended for Elasticsearch + Kafka + Connect on one host (**SEARCH FEATURE.md §19.2**).
+**Prerequisites:** JDK **21**, **Docker** + Compose for infra scripts and integration tests, **≥ 16 GB RAM** recommended when Kafka/Connect are added (**SEARCH FEATURE.md §19.2**).
 
 ## Demo and implementation scope
 
@@ -79,9 +102,19 @@ The design matches **CQRS-style** product/catalog systems (OLTP for writes, sear
 
 Integration tests with **Testcontainers** (PostgreSQL, Kafka, Elasticsearch; **Debezium** / Connect where CI budget allows), plus **contract tests** on **unwrapped** outbox event schemas so indexer tests do not depend on raw Debezium envelopes. Optional **Compose** smoke job (**§19**).
 
-## Repository layout (after implementation)
+## Repository layout
 
-A multi-module Maven parent is planned (`search-query-service`, `search-indexer-service`, `enrichment-worker`, `inventory-api-service` or separate repo, `shared-contracts`, etc.), plus **`docker-compose.yml`** (and later **`k8s/`** or Helm charts per **§20**). Details live in **SEARCH FEATURE.md**.
+| Path | Purpose |
+|------|---------|
+| `shared-contracts/` | JSON Schemas + fixture-based contract tests |
+| `inventory-api-service/` | Port **8080** — inventory API (outbox in Stage C) |
+| `search-query-service/` | Port **8081** — search API (Elasticsearch in Stage B) |
+| `search-indexer-service/` | Port **8082** — Kafka → ES indexer (Stage C) |
+| `compose/docker-compose.infra.yml` | D0: Postgres, Elasticsearch, Redis |
+| `scripts/onboard.sh` | Developer onboarding + `mvnw verify` |
+| `scripts/validate-infra.sh` | Health checks when Compose D0 is running |
+
+A full **`docker-compose.yml`** (Kafka + Connect + Debezium + apps) and optional **`k8s/`** remain per **SEARCH FEATURE.md §19–§20**.
 
 ## License
 
